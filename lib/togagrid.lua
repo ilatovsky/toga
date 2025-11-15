@@ -7,12 +7,19 @@ local togagrid = {
   rows = 8,
   old_buffer = nil,
   new_buffer = nil,
+  dirty = nil, -- dirty flag array for tracking changes
   dest = {},
   cleanup_done = false,
   old_grid = nil,
   old_osc_in = nil,
   old_cleanup = nil,
-  key = nil -- key event callback
+  key = nil, -- key event callback
+  last_refresh_time = 0, -- for throttling
+  refresh_interval = 0.01667, -- 30Hz refresh rate (33ms)
+  batch_sync_interval = 0.25, -- Sync one batch every 250ms
+  sync_batch_row = 1, -- Current row being synced (1-8)
+  batch_size = 1, -- Number of rows per batch
+  sync_clock_id = nil -- Background sync coroutine ID
 }
 
 function togagrid:connect()
@@ -35,6 +42,19 @@ function create_buffer(width,height)
   return new_buffer
 end
 
+function create_dirty_flags(width,height)
+  local dirty = {}
+
+  for r = 1,width do
+    dirty[r] = {}
+    for c = 1,height do
+      dirty[r][c] = false
+    end
+  end
+
+  return dirty
+end
+
 function togagrid:init()
   -- UNCOMMENT to add default touchosc client
   --table.insert(self.dest, {"192.168.0.123",8002})
@@ -42,8 +62,10 @@ function togagrid:init()
   self.device = self
   self.old_buffer = create_buffer(self.cols, self.rows)
   self.new_buffer = create_buffer(self.cols, self.rows)
+  self.dirty = create_dirty_flags(self.cols, self.rows)
   self:hook_osc_in()
   self:hook_cleanup()
+  self:start_background_sync()
   self:refresh(true)
   
   self.old_grid = grid.connect()
@@ -58,6 +80,50 @@ function togagrid:init()
   end
   
   self:send_connected(nil, true)
+end
+
+function togagrid:start_background_sync()
+  -- Stop existing sync if running
+  if self.sync_clock_id then
+    clock.cancel(self.sync_clock_id)
+  end
+  
+  -- Start background sync coroutine
+  self.sync_clock_id = clock.run(function()
+    while not self.cleanup_done do
+      clock.sleep(self.batch_sync_interval)
+      
+      -- Only sync if we have destinations
+      if #self.dest > 0 then
+        self:sync_batch()
+      end
+    end
+  end)
+  print("togagrid: started background sync (row-based batching)")
+end
+
+function togagrid:sync_batch()
+  -- Calculate which rows to sync in this batch
+  local batch_rows = {}
+  for i = 1, self.batch_size do
+    local row = self.sync_batch_row + i - 1
+    if row <= self.rows then
+      table.insert(batch_rows, row)
+    end
+  end
+  
+  -- Sync the batch rows
+  for _, batch_row in ipairs(batch_rows) do
+    for c = 1, self.cols do
+      self:update_led(c, batch_row)
+    end
+  end
+  
+  -- Move to next batch, wrap around after last row
+  self.sync_batch_row = self.sync_batch_row + self.batch_size
+  if self.sync_batch_row > self.rows then
+    self.sync_batch_row = 1
+  end
 end
 
 function string.starts(String,Start)
@@ -95,10 +161,7 @@ function togagrid.osc_in(path, args, from)
       if togagrid.key then
         togagrid.key(x, y, z)
       end
-      if z == 0 then
-        -- send button status to touchosc again after release event, which erased button value 
-        togagrid:update_led(x, y)
-      end
+      -- Removed immediate LED update on button release - let next refresh handle it
       consumed = true
     end
   end
@@ -122,6 +185,19 @@ function togagrid.cleanup()
     togagrid.old_cleanup()
   end
   if not togagrid.cleanup_done then
+    -- Stop background sync
+    if togagrid.sync_clock_id then
+      clock.cancel(togagrid.sync_clock_id)
+      togagrid.sync_clock_id = nil
+      print("togagrid: stopped background sync")
+    end
+    
+    -- Clear all LEDs before disconnecting
+    print("togagrid: clearing all LEDs on script shutdown")
+    togagrid:all(0)
+    togagrid:refresh(true) -- Force immediate refresh to clear all LEDs
+    
+    -- Send disconnected signal
     togagrid:send_connected(nil, false)
     togagrid.cleanup_done = true
   end
@@ -144,6 +220,7 @@ function togagrid:all(z)
   for r = 1,self.rows do
     for c = 1,self.cols do
       self.new_buffer[c][r] = z
+      self.dirty[c][r] = true
     end
   end
 
@@ -154,8 +231,10 @@ end
 
 function togagrid:led(x, y, z)
   if x > self.cols or y > self.rows then return end
-  self.new_buffer[x][y] = z
-  
+  if self.new_buffer[x][y] ~= z then
+    self.new_buffer[x][y] = z
+    self.dirty[x][y] = true
+  end
   
   if self.old_grid then
     self.old_grid:led(x, y, z)
@@ -163,11 +242,35 @@ function togagrid:led(x, y, z)
 end
 
 function togagrid:refresh(force_refresh, target_dest)
+  -- Throttle refresh to 30Hz unless forced
+  if not force_refresh then
+    local now = util.time()
+    if (now - self.last_refresh_time) < self.refresh_interval then
+      return -- Skip this refresh, too soon
+    end
+    self.last_refresh_time = now
+  end
+  
+  -- When force_refresh is true, send all cells
+  -- When force_refresh is false, only send dirty cells
   for r = 1,self.rows do
     for c = 1,self.cols do
-      if force_refresh or self.new_buffer[c][r] ~= self.old_buffer[c][r] then
+      local should_update = force_refresh or self.dirty[c][r]
+      if should_update then
         self.old_buffer[c][r] = self.new_buffer[c][r]
         self:update_led(c, r, target_dest)
+        if not force_refresh then
+          self.dirty[c][r] = false
+        end
+      end
+    end
+  end
+  
+  -- Clear all dirty flags after a forced refresh
+  if force_refresh then
+    for r = 1,self.rows do
+      for c = 1,self.cols do
+        self.dirty[c][r] = false
       end
     end
   end
@@ -181,11 +284,6 @@ function togagrid:intensity(i)
   if self.old_grid then
     self.old_grid:intensity(i)
   end
-end
-
-function transform_to_button_x(z)
-  local linear = z / 15.0
-  return 0.9 * math.pow(linear, 1.5)
 end
 
 function togagrid:update_led(c, r, target_dest)
