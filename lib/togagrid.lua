@@ -16,10 +16,10 @@ local togagrid = {
   key = nil,                  -- key event callback
   last_refresh_time = 0,      -- for throttling
   refresh_interval = 0.01667, -- 30Hz refresh rate (33ms)
-  batch_sync_interval = 0.25, -- Sync one batch every 250ms
-  sync_batch_row = 1,         -- Current row being synced (1-8)
-  batch_size = 1,             -- Number of rows per batch
-  sync_clock_id = nil         -- Background sync coroutine ID
+
+  -- Packed state configuration
+  leds_per_word = 8, -- 8 LEDs per 32-bit number (4 bits each = 32 bits)
+  bits_per_led = 4   -- 4 bits = 16 brightness levels (0-15)
 }
 
 function togagrid:connect()
@@ -29,30 +29,105 @@ function togagrid:connect()
   return togagrid
 end
 
-local function create_buffer(width, height)
-  local new_buffer = {}
+-- Create packed state buffer using bitwise storage
+-- Each 32-bit number stores 8 LEDs (4 bits each)
+-- For 16x8 grid (128 LEDs): 128/8 = 16 numbers
+local function create_packed_buffer(width, height, leds_per_word)
+  local total_leds = width * height
+  local num_words = math.ceil(total_leds / leds_per_word)
+  local buffer = {}
 
-  for r = 1, width do
-    new_buffer[r] = {}
-    for c = 1, height do
-      new_buffer[r][c] = 0
-    end
+  for i = 1, num_words do
+    buffer[i] = 0 -- Each word starts as 0x00000000
   end
 
-  return new_buffer
+  return buffer
 end
 
+-- Create binary dirty flags as bit array (using numbers)
+-- Each number holds 32 bits, so we need ceil(total_leds / 32) numbers
 local function create_dirty_flags(width, height)
+  local total_leds = width * height
+  local num_words = math.ceil(total_leds / 32)
   local dirty = {}
 
-  for r = 1, width do
-    dirty[r] = {}
-    for c = 1, height do
-      dirty[r][c] = false
-    end
+  for i = 1, num_words do
+    dirty[i] = 0 -- 32-bit integer, all flags initially false
   end
 
   return dirty
+end
+
+-- Convert 2D grid coordinates to LED index
+local function grid_to_index(x, y, cols)
+  return (y - 1) * cols + (x - 1) + 1
+end
+
+-- Convert LED index to 2D grid coordinates
+local function index_to_grid(index, cols)
+  local x = ((index - 1) % cols) + 1
+  local y = math.floor((index - 1) / cols) + 1
+  return x, y
+end
+
+-- Get LED brightness from packed buffer using bitwise operations
+local function get_led_from_packed(buffer, index, leds_per_word, bits_per_led)
+  local word_index = math.floor((index - 1) / leds_per_word) + 1
+  local led_offset = (index - 1) % leds_per_word
+  local bit_shift = led_offset * bits_per_led
+  local mask = (1 << bits_per_led) - 1 -- 0x0F for 4 bits
+
+  return (buffer[word_index] >> bit_shift) & mask
+end
+
+-- Set LED brightness in packed buffer using bitwise operations
+local function set_led_in_packed(buffer, index, brightness, leds_per_word, bits_per_led)
+  local word_index = math.floor((index - 1) / leds_per_word) + 1
+  local led_offset = (index - 1) % leds_per_word
+  local bit_shift = led_offset * bits_per_led
+  local mask = (1 << bits_per_led) - 1 -- 0x0F for 4 bits
+
+  -- Clear the old value and set the new one
+  local clear_mask = ~(mask << bit_shift)
+  buffer[word_index] = (buffer[word_index] & clear_mask) | ((brightness & mask) << bit_shift)
+end
+
+-- Set dirty bit for given LED index
+local function set_dirty_bit(dirty_array, index)
+  local word_index = math.floor((index - 1) / 32) + 1
+  local bit_index = (index - 1) % 32
+  dirty_array[word_index] = dirty_array[word_index]| (1 << bit_index)
+end
+
+-- Clear dirty bit for given LED index
+local function clear_dirty_bit(dirty_array, index)
+  local word_index = math.floor((index - 1) / 32) + 1
+  local bit_index = (index - 1) % 32
+  dirty_array[word_index] = dirty_array[word_index] & ~(1 << bit_index)
+end
+
+-- Check if dirty bit is set for given LED index
+local function is_dirty_bit_set(dirty_array, index)
+  local word_index = math.floor((index - 1) / 32) + 1
+  local bit_index = (index - 1) % 32
+  return (dirty_array[word_index] & (1 << bit_index)) ~= 0
+end
+
+-- Clear all dirty bits
+local function clear_all_dirty_bits(dirty_array)
+  for i = 1, #dirty_array do
+    dirty_array[i] = 0
+  end
+end
+
+-- Check if any dirty bits are set
+local function has_dirty_bits(dirty_array)
+  for i = 1, #dirty_array do
+    if dirty_array[i] ~= 0 then
+      return true
+    end
+  end
+  return false
 end
 
 function togagrid:init()
@@ -60,12 +135,11 @@ function togagrid:init()
   --table.insert(self.dest, {"192.168.0.123",8002})
 
   self.device = self
-  self.old_buffer = create_buffer(self.cols, self.rows)
-  self.new_buffer = create_buffer(self.cols, self.rows)
+  self.old_buffer = create_packed_buffer(self.cols, self.rows, self.leds_per_word)
+  self.new_buffer = create_packed_buffer(self.cols, self.rows, self.leds_per_word)
   self.dirty = create_dirty_flags(self.cols, self.rows)
   self:hook_osc_in()
   self:hook_cleanup()
-  self:start_background_sync()
   self:refresh(true)
 
   self.old_grid = grid.connect()
@@ -80,50 +154,6 @@ function togagrid:init()
   end
 
   self:send_connected(nil, true)
-end
-
-function togagrid:start_background_sync()
-  -- Stop existing sync if running
-  if self.sync_clock_id then
-    clock.cancel(self.sync_clock_id)
-  end
-
-  -- Start background sync coroutine
-  self.sync_clock_id = clock.run(function()
-    while not self.cleanup_done do
-      clock.sleep(self.batch_sync_interval)
-
-      -- Only sync if we have destinations
-      if #self.dest > 0 then
-        self:sync_batch()
-      end
-    end
-  end)
-  print("togagrid: started background sync (row-based batching)")
-end
-
-function togagrid:sync_batch()
-  -- Calculate which rows to sync in this batch
-  local batch_rows = {}
-  for i = 1, self.batch_size do
-    local row = self.sync_batch_row + i - 1
-    if row <= self.rows then
-      table.insert(batch_rows, row)
-    end
-  end
-
-  -- Sync the batch rows
-  for _, batch_row in ipairs(batch_rows) do
-    for c = 1, self.cols do
-      self:update_led(c, batch_row)
-    end
-  end
-
-  -- Move to next batch, wrap around after last row
-  self.sync_batch_row = self.sync_batch_row + self.batch_size
-  if self.sync_batch_row > self.rows then
-    self.sync_batch_row = 1
-  end
 end
 
 -- function string.starts(String, Start)
@@ -185,13 +215,6 @@ function togagrid.cleanup()
     togagrid.old_cleanup()
   end
   if not togagrid.cleanup_done then
-    -- Stop background sync
-    if togagrid.sync_clock_id then
-      clock.cancel(togagrid.sync_clock_id)
-      togagrid.sync_clock_id = nil
-      print("togagrid: stopped background sync")
-    end
-
     -- Clear all LEDs before disconnecting
     print("togagrid: clearing all LEDs on script shutdown")
     togagrid:all(0)
@@ -217,11 +240,13 @@ function togagrid:rotation(val)
 end
 
 function togagrid:all(z)
-  for r = 1, self.rows do
-    for c = 1, self.cols do
-      self.new_buffer[c][r] = z
-      self.dirty[c][r] = true
-    end
+  local total_leds = self.cols * self.rows
+  local brightness = math.max(0, math.min(15, z))
+
+  -- Set all LEDs to same brightness using packed operations
+  for i = 1, total_leds do
+    set_led_in_packed(self.new_buffer, i, brightness, self.leds_per_word, self.bits_per_led)
+    set_dirty_bit(self.dirty, i)
   end
 
   if self.old_grid then
@@ -230,10 +255,18 @@ function togagrid:all(z)
 end
 
 function togagrid:led(x, y, z)
-  if x > self.cols or y > self.rows then return end
-  if self.new_buffer[x][y] ~= z then
-    self.new_buffer[x][y] = z
-    self.dirty[x][y] = true
+  if x < 1 or x > self.cols or y < 1 or y > self.rows then return end
+
+  local index = grid_to_index(x, y, self.cols)
+  local brightness = math.max(0, math.min(15, z))
+
+  -- Get current value using bitwise operations
+  local current = get_led_from_packed(self.new_buffer, index, self.leds_per_word, self.bits_per_led)
+
+  if current ~= brightness then
+    -- Set new value using bitwise operations
+    set_led_in_packed(self.new_buffer, index, brightness, self.leds_per_word, self.bits_per_led)
+    set_dirty_bit(self.dirty, index)
   end
 
   if self.old_grid then
@@ -251,28 +284,16 @@ function togagrid:refresh(force_refresh, target_dest)
     self.last_refresh_time = now
   end
 
-  -- When force_refresh is true, send all cells
-  -- When force_refresh is false, only send dirty cells
-  for r = 1, self.rows do
-    for c = 1, self.cols do
-      local should_update = force_refresh or self.dirty[c][r]
-      if should_update then
-        self.old_buffer[c][r] = self.new_buffer[c][r]
-        self:update_led(c, r, target_dest)
-        if not force_refresh then
-          self.dirty[c][r] = false
-        end
-      end
-    end
-  end
+  -- Always use bulk update - send entire grid state in one message
+  local has_changes = force_refresh or has_dirty_bits(self.dirty)
 
-  -- Clear all dirty flags after a forced refresh
-  if force_refresh then
-    for r = 1, self.rows do
-      for c = 1, self.cols do
-        self.dirty[c][r] = false
-      end
+  if has_changes then
+    self:send_bulk_grid_state(target_dest)
+    -- Copy new_buffer to old_buffer (packed word by word)
+    for i = 1, #self.new_buffer do
+      self.old_buffer[i] = self.new_buffer[i]
     end
+    clear_all_dirty_bits(self.dirty)
   end
 
   if self.old_grid then
@@ -286,20 +307,6 @@ function togagrid:intensity(i)
   end
 end
 
-function togagrid:update_led(c, r, target_dest)
-  local z = self.new_buffer[c][r]
-  local i = c + (r - 1) * self.cols
-  local addr = string.format("/togagrid/%d", i)
-  --print("togagrid osc.send", addr, z)
-  for d, dest in pairs(self.dest) do
-    if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
-      -- do nothing
-    else
-      osc.send(dest, addr, { z / 15.0 })
-    end
-  end
-end
-
 function togagrid:send_connected(target_dest, connected)
   for d, dest in pairs(self.dest) do
     if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
@@ -308,6 +315,66 @@ function togagrid:send_connected(target_dest, connected)
       osc.send(dest, "/toga_connection", { connected and 1.0 or 0.0 })
     end
   end
+end
+
+-- Send entire grid state as bulk update
+-- Format: /togagrid_bulk with array of 128 hex values (extracted from packed buffer)
+-- Each value represents brightness level 0-15 encoded as hex string
+function togagrid:send_bulk_grid_state(target_dest)
+  local grid_data = {}
+  local total_leds = self.cols * self.rows
+
+  -- Extract hex values from packed buffer using bitwise operations
+  for i = 1, total_leds do
+    local brightness = get_led_from_packed(self.new_buffer, i, self.leds_per_word, self.bits_per_led)
+    -- Convert to hex string (0-F)
+    grid_data[i] = string.format("%X", brightness)
+  end
+
+  -- Send as single OSC message with array of hex strings
+  for d, dest in pairs(self.dest) do
+    if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
+      -- do nothing
+    else
+      osc.send(dest, "/togagrid_bulk", grid_data)
+    end
+  end
+end -- Alternative compact format: send as single hex string
+
+-- Format: /togagrid_compact with single string of 128 hex characters
+function togagrid:send_compact_grid_state(target_dest)
+  local hex_chars = {}
+  local total_leds = self.cols * self.rows
+
+  -- Build hex character array first (faster than string concatenation)
+  for i = 1, total_leds do
+    local brightness = self.new_buffer[i]
+    -- Convert to hex char (0-F) - brightness already clamped
+    hex_chars[i] = string.format("%X", brightness)
+  end
+
+  -- Join all hex characters into single string
+  local hex_string = table.concat(hex_chars)
+
+  -- Send as single OSC message with hex string
+  for d, dest in pairs(self.dest) do
+    if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
+      -- do nothing
+    else
+      osc.send(dest, "/togagrid_compact", { hex_string })
+    end
+  end
+end
+
+-- Get grid info
+function togagrid:get_info()
+  return {
+    total_leds = self.cols * self.rows,
+    packed_words = math.ceil((self.cols * self.rows) / self.leds_per_word),
+    leds_per_word = self.leds_per_word,
+    bits_per_led = self.bits_per_led,
+    memory_usage = math.ceil((self.cols * self.rows) / self.leds_per_word) * 4 -- bytes
+  }
 end
 
 return togagrid
