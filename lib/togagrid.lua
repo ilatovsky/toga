@@ -135,8 +135,6 @@ function togagrid:init()
   self:send_connected(nil, true)
 end
 
--- string.starts function is defined in togaarc.lua
-
 -- @static
 function togagrid.osc_in(path, args, from)
   local consumed = false
@@ -174,15 +172,17 @@ function togagrid.osc_in(path, args, from)
   end
 
   if not consumed then
-    -- invoking original osc.event callback
-    togagrid.old_osc_in(path, args, from)
+    -- invoking original osc.event callback if it exists
+    if togagrid.old_osc_in then
+      togagrid.old_osc_in(path, args, from)
+    end
   end
 end
 
 function togagrid:hook_osc_in()
-  if self.old_osc_in ~= nil then return end
+  if togagrid.old_osc_in ~= nil then return end
   --print("togagrid: hook old osc_in")
-  self.old_osc_in = osc.event
+  togagrid.old_osc_in = osc.event
   osc.event = togagrid.osc_in
 end
 
@@ -204,9 +204,9 @@ function togagrid.cleanup()
 end
 
 function togagrid:hook_cleanup()
-  if self.old_cleanup ~= nil then return end
-  --print("togagrid: hook old cleaup")
-  self.old_cleanup = grid.cleanup
+  if togagrid.old_cleanup ~= nil then return end
+  --print("togagrid: hook old cleanup")
+  togagrid.old_cleanup = grid.cleanup
   grid.cleanup = togagrid.cleanup
 end
 
