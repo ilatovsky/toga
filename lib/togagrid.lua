@@ -63,13 +63,6 @@ local function grid_to_index(x, y, cols)
   return (y - 1) * cols + (x - 1) + 1
 end
 
--- Convert LED index to 2D grid coordinates
-local function index_to_grid(index, cols)
-  local x = ((index - 1) % cols) + 1
-  local y = math.floor((index - 1) / cols) + 1
-  return x, y
-end
-
 -- Get LED brightness from packed buffer using bitwise operations
 local function get_led_from_packed(buffer, index, leds_per_word, bits_per_led)
   local word_index = math.floor((index - 1) / leds_per_word) + 1
@@ -97,20 +90,6 @@ local function set_dirty_bit(dirty_array, index)
   local word_index = math.floor((index - 1) / 32) + 1
   local bit_index = (index - 1) % 32
   dirty_array[word_index] = dirty_array[word_index]| (1 << bit_index)
-end
-
--- Clear dirty bit for given LED index
-local function clear_dirty_bit(dirty_array, index)
-  local word_index = math.floor((index - 1) / 32) + 1
-  local bit_index = (index - 1) % 32
-  dirty_array[word_index] = dirty_array[word_index] & ~(1 << bit_index)
-end
-
--- Check if dirty bit is set for given LED index
-local function is_dirty_bit_set(dirty_array, index)
-  local word_index = math.floor((index - 1) / 32) + 1
-  local bit_index = (index - 1) % 32
-  return (dirty_array[word_index] & (1 << bit_index)) ~= 0
 end
 
 -- Clear all dirty bits
@@ -156,9 +135,7 @@ function togagrid:init()
   self:send_connected(nil, true)
 end
 
--- function string.starts(String, Start)
---   return string.sub(String, 1, string.len(Start)) == Start
--- end
+-- string.starts function is defined in togaarc.lua
 
 -- @static
 function togagrid.osc_in(path, args, from)
@@ -166,7 +143,7 @@ function togagrid.osc_in(path, args, from)
   if not togagrid.cleanup_done then
     local x, y, z, i
     --print("togagrid_osc_in", dump(path), dump(args), dump(from))
-    if string.starts(path, "/toga_connection") then
+    if string.sub(path, 1, 16) == "/toga_connection" then
       print("togagrid connect!")
       local added = false
       for d, dest in pairs(togagrid.dest) do
@@ -182,7 +159,7 @@ function togagrid.osc_in(path, args, from)
       -- echo back anyway to update connection button value
       togagrid:send_connected(from, true)
       -- do not consume the event so togaarc can also add the new touchosc client.
-    elseif string.starts(path, "/togagrid/") then
+    elseif string.sub(path, 1, 10) == "/togagrid/" then
       i = tonumber(string.sub(path, 11))
       x = ((i - 1) % 16) + 1
       y = (i - 1) // 16 + 1
