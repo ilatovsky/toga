@@ -52,22 +52,20 @@ function onReceiveOSC(message)
 	last_update_time = system.getTime()
 end
 
--- Process bulk update with array of hex values
-function handle_bulk_update(hex_array)
-	if #hex_array ~= TOTAL_LEDS then
-		print("Error: Expected " .. TOTAL_LEDS .. " hex values, got " .. #hex_array)
+-- Process bulk update with single hex string (128 characters)
+function handle_bulk_update(args)
+	local hex_string = args[1]
+	if not hex_string or string.len(hex_string) ~= TOTAL_LEDS then
+		print("Error: Expected " ..
+		TOTAL_LEDS .. " hex characters, got " .. (hex_string and string.len(hex_string) or "nil"))
 		return
 	end
 
-	-- Process all LEDs in batch
+	-- Process each character
 	for i = 1, TOTAL_LEDS do
-		local hex_val = hex_array[i]
-		local brightness = tonumber(hex_val, 16) or 0
+		local hex_char = string.sub(hex_string, i, i)
+		local brightness = tonumber(hex_char, 16) or 0
 		local normalized_brightness = brightness / 15.0
-
-		-- Calculate grid position (1-based indexing)
-		local x = ((i - 1) % GRID_COLS) + 1
-		local y = math.floor((i - 1) / GRID_COLS) + 1
 
 		-- Update LED using OSC address /togagrid/{index}
 		local button_address = "/togagrid/" .. i

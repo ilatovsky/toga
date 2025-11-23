@@ -308,12 +308,15 @@ function togagrid:send_bulk_grid_state(target_dest)
     grid_data[i] = string.format("%X", brightness)
   end
 
-  -- Send as single OSC message with array of hex strings
+  -- Convert array to single string for better OSC compatibility
+  local hex_string = table.concat(grid_data)
+
+  -- Send as single OSC message with hex string
   for d, dest in pairs(self.dest) do
     if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
       -- do nothing
     else
-      osc.send(dest, "/togagrid_bulk", grid_data)
+      osc.send(dest, "/togagrid_bulk", { hex_string })
     end
   end
 end -- Alternative compact format: send as single hex string
@@ -325,8 +328,8 @@ function togagrid:send_compact_grid_state(target_dest)
 
   -- Build hex character array first (faster than string concatenation)
   for i = 1, total_leds do
-    local brightness = self.new_buffer[i]
-    -- Convert to hex char (0-F) - brightness already clamped
+    local brightness = get_led_from_packed(self.new_buffer, i, self.leds_per_word, self.bits_per_led)
+    -- Convert to hex char (0-F)
     hex_chars[i] = string.format("%X", brightness)
   end
 
