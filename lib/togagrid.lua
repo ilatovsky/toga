@@ -13,28 +13,28 @@ local togagrid = {
   old_grid = nil,
   old_osc_in = nil,
   old_cleanup = nil,
-  key = nil, -- key event callback
-  last_refresh_time = 0, -- for throttling
+  key = nil,                  -- key event callback
+  last_refresh_time = 0,      -- for throttling
   refresh_interval = 0.01667, -- 30Hz refresh rate (33ms)
   batch_sync_interval = 0.25, -- Sync one batch every 250ms
-  sync_batch_row = 1, -- Current row being synced (1-8)
-  batch_size = 1, -- Number of rows per batch
-  sync_clock_id = nil -- Background sync coroutine ID
+  sync_batch_row = 1,         -- Current row being synced (1-8)
+  batch_size = 1,             -- Number of rows per batch
+  sync_clock_id = nil         -- Background sync coroutine ID
 }
 
 function togagrid:connect()
-    if _ENV.togagrid then return _ENV.togagrid end
-    togagrid:init()
-    _ENV.togagrid = togagrid
-    return togagrid
+  if _ENV.togagrid then return _ENV.togagrid end
+  togagrid:init()
+  _ENV.togagrid = togagrid
+  return togagrid
 end
 
-function create_buffer(width,height)
+local function create_buffer(width, height)
   local new_buffer = {}
 
-  for r = 1,width do
+  for r = 1, width do
     new_buffer[r] = {}
-    for c = 1,height do
+    for c = 1, height do
       new_buffer[r][c] = 0
     end
   end
@@ -42,12 +42,12 @@ function create_buffer(width,height)
   return new_buffer
 end
 
-function create_dirty_flags(width,height)
+local function create_dirty_flags(width, height)
   local dirty = {}
 
-  for r = 1,width do
+  for r = 1, width do
     dirty[r] = {}
-    for c = 1,height do
+    for c = 1, height do
       dirty[r][c] = false
     end
   end
@@ -67,7 +67,7 @@ function togagrid:init()
   self:hook_cleanup()
   self:start_background_sync()
   self:refresh(true)
-  
+
   self.old_grid = grid.connect()
   if self.old_grid then
     self.old_grid.key = function(x, y, z)
@@ -78,7 +78,7 @@ function togagrid:init()
       end
     end
   end
-  
+
   self:send_connected(nil, true)
 end
 
@@ -87,12 +87,12 @@ function togagrid:start_background_sync()
   if self.sync_clock_id then
     clock.cancel(self.sync_clock_id)
   end
-  
+
   -- Start background sync coroutine
   self.sync_clock_id = clock.run(function()
     while not self.cleanup_done do
       clock.sleep(self.batch_sync_interval)
-      
+
       -- Only sync if we have destinations
       if #self.dest > 0 then
         self:sync_batch()
@@ -111,14 +111,14 @@ function togagrid:sync_batch()
       table.insert(batch_rows, row)
     end
   end
-  
+
   -- Sync the batch rows
   for _, batch_row in ipairs(batch_rows) do
     for c = 1, self.cols do
       self:update_led(c, batch_row)
     end
   end
-  
+
   -- Move to next batch, wrap around after last row
   self.sync_batch_row = self.sync_batch_row + self.batch_size
   if self.sync_batch_row > self.rows then
@@ -126,9 +126,9 @@ function togagrid:sync_batch()
   end
 end
 
-function string.starts(String,Start)
-   return string.sub(String,1,string.len(Start))==Start
-end
+-- function string.starts(String, Start)
+--   return string.sub(String, 1, string.len(Start)) == Start
+-- end
 
 -- @static
 function togagrid.osc_in(path, args, from)
@@ -145,7 +145,7 @@ function togagrid.osc_in(path, args, from)
         end
       end
       if not added then
-        print("togagrid: add new toga client", from[1]..":"..from[2])
+        print("togagrid: add new toga client", from[1] .. ":" .. from[2])
         table.insert(togagrid.dest, from)
         togagrid:refresh(true, from)
       end
@@ -153,9 +153,9 @@ function togagrid.osc_in(path, args, from)
       togagrid:send_connected(from, true)
       -- do not consume the event so togaarc can also add the new touchosc client.
     elseif string.starts(path, "/togagrid/") then
-      i = tonumber(string.sub(path,11))
-      x = ((i-1) % 16) + 1
-      y = (i-1) // 16 + 1
+      i = tonumber(string.sub(path, 11))
+      x = ((i - 1) % 16) + 1
+      y = (i - 1) // 16 + 1
       z = args[1] // 1
       --print("togagrid_osc_in togagrid", i, x, y, z)
       if togagrid.key then
@@ -165,7 +165,7 @@ function togagrid.osc_in(path, args, from)
       consumed = true
     end
   end
-  
+
   if not consumed then
     -- invoking original osc.event callback
     togagrid.old_osc_in(path, args, from)
@@ -191,12 +191,12 @@ function togagrid.cleanup()
       togagrid.sync_clock_id = nil
       print("togagrid: stopped background sync")
     end
-    
+
     -- Clear all LEDs before disconnecting
     print("togagrid: clearing all LEDs on script shutdown")
     togagrid:all(0)
     togagrid:refresh(true) -- Force immediate refresh to clear all LEDs
-    
+
     -- Send disconnected signal
     togagrid:send_connected(nil, false)
     togagrid.cleanup_done = true
@@ -217,8 +217,8 @@ function togagrid:rotation(val)
 end
 
 function togagrid:all(z)
-  for r = 1,self.rows do
-    for c = 1,self.cols do
+  for r = 1, self.rows do
+    for c = 1, self.cols do
       self.new_buffer[c][r] = z
       self.dirty[c][r] = true
     end
@@ -235,7 +235,7 @@ function togagrid:led(x, y, z)
     self.new_buffer[x][y] = z
     self.dirty[x][y] = true
   end
-  
+
   if self.old_grid then
     self.old_grid:led(x, y, z)
   end
@@ -250,11 +250,11 @@ function togagrid:refresh(force_refresh, target_dest)
     end
     self.last_refresh_time = now
   end
-  
+
   -- When force_refresh is true, send all cells
   -- When force_refresh is false, only send dirty cells
-  for r = 1,self.rows do
-    for c = 1,self.cols do
+  for r = 1, self.rows do
+    for c = 1, self.cols do
       local should_update = force_refresh or self.dirty[c][r]
       if should_update then
         self.old_buffer[c][r] = self.new_buffer[c][r]
@@ -265,16 +265,16 @@ function togagrid:refresh(force_refresh, target_dest)
       end
     end
   end
-  
+
   -- Clear all dirty flags after a forced refresh
   if force_refresh then
-    for r = 1,self.rows do
-      for c = 1,self.cols do
+    for r = 1, self.rows do
+      for c = 1, self.cols do
         self.dirty[c][r] = false
       end
     end
   end
-  
+
   if self.old_grid then
     self.old_grid:refresh()
   end
@@ -288,14 +288,14 @@ end
 
 function togagrid:update_led(c, r, target_dest)
   local z = self.new_buffer[c][r]
-  local i = c + (r-1) * self.cols
+  local i = c + (r - 1) * self.cols
   local addr = string.format("/togagrid/%d", i)
   --print("togagrid osc.send", addr, z)
   for d, dest in pairs(self.dest) do
     if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
       -- do nothing
     else
-      osc.send(dest, addr, {z / 15.0})
+      osc.send(dest, addr, { z / 15.0 })
     end
   end
 end
@@ -305,7 +305,7 @@ function togagrid:send_connected(target_dest, connected)
     if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
       -- do nothing
     else
-      osc.send(dest, "/toga_connection", {connected and 1.0 or 0.0})
+      osc.send(dest, "/toga_connection", { connected and 1.0 or 0.0 })
     end
   end
 end
