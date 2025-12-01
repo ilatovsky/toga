@@ -4,30 +4,48 @@
 
 local toga = include("../lib/togagrid")
 
+-- Global variables (following monome convention)
+local g -- grid connection
+local rotation = 0
+local grid_dirty = true
+
 function init()
-	-- Connect to toga grid
-	local grid = toga:connect()
+	-- Connect to toga grid (matching official API)
+	g = toga:connect() -- defaults to port 1
 
 	print("Toga Grid Rotation Demo")
 	print("Use E1 to change rotation")
 	print("0 = 0°, 1 = 90°, 2 = 180°, 3 = 270°")
+	print("Connected grid: " .. g.name)
+	print("Grid size: " .. g.device.cols .. "x" .. g.device.rows)
+
+	-- Set up key handler (official API pattern)
+	g.key = function(x, y, z)
+		if z == 1 then
+			print("Grid key pressed:", x, y)
+			grid_dirty = true
+		end
+	end
 
 	-- Test pattern: diagonal line
 	function draw_test_pattern()
-		grid:all(0) -- Clear grid
+		if not g or not g.device then return end
+
+		g:all(0) -- Clear grid
 
 		-- Draw diagonal line (only in safe 8x8 area for rotation)
 		for i = 1, 8 do
-			grid:led(i, i, 15) -- Diagonal
+			g:led(i, i, 15) -- Diagonal
 		end
 
 		-- Corner markers for orientation reference (safe coordinates)
-		grid:led(1, 1, 10) -- Top-left
-		grid:led(8, 1, 8) -- Top-right (changed from 16,1)
-		grid:led(1, 8, 6) -- Bottom-left
-		grid:led(8, 8, 4) -- Bottom-right (changed from 16,8)
+		g:led(1, 1, 10) -- Top-left
+		g:led(8, 1, 8) -- Top-right (changed from 16,1)
+		g:led(1, 8, 6) -- Bottom-left
+		g:led(8, 8, 4) -- Bottom-right (changed from 16,8)
 
-		grid:refresh()
+		g:refresh()
+		grid_dirty = false
 	end
 
 	-- Initial pattern
@@ -42,7 +60,7 @@ function init()
 			print("Setting rotation to " .. rotation .. " (" .. (rotation * 90) .. "°)")
 
 			-- Apply rotation
-			grid:rotation(rotation)
+			g:rotation(rotation)
 
 			-- Redraw pattern
 			draw_test_pattern()
@@ -51,13 +69,13 @@ function init()
 
 	function key(n, z)
 		if n == 2 and z == 1 then
-			print("Grid info:", grid:get_info())
+			print("Grid info:", g:get_info())
 		end
 		if n == 3 and z == 1 then
 			-- Cycle through rotations
 			rotation = (rotation + 1) % 4
 			print("Cycling to rotation " .. rotation .. " (" .. (rotation * 90) .. "°)")
-			grid:rotation(rotation)
+			g:rotation(rotation)
 			draw_test_pattern()
 		end
 	end
@@ -65,9 +83,18 @@ end
 
 function cleanup()
 	-- Reset rotation on exit
-	if toga then
-		toga:rotation(0)
-		toga:all(0)
-		toga:refresh()
+	if g then
+		g:rotation(0)
+		g:all(0)
+		g:refresh()
 	end
+end
+
+-- Grid device callbacks (official API)
+function grid.add(new_grid)
+	print("Grid connected: " .. new_grid.name)
+end
+
+function grid.remove(old_grid)
+	print("Grid disconnected: " .. old_grid.name)
 end

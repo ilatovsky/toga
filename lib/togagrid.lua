@@ -2,9 +2,22 @@
 --local grid = util.file_exists(_path.code.."midigrid") and include "midigrid/lib/mg_128" or grid
 
 local togagrid = {
-  device = nil, -- needed by cheat codes 2
+  -- API-compatible properties
+  name = "toga virtual grid",
+  device = {
+    id = 1,
+    cols = 16,
+    rows = 8,
+    port = 1,
+    name = "toga virtual grid",
+    serial = "toga-001"
+  },
+
+  -- Legacy properties for backward compatibility
   cols = 16,
   rows = 8,
+
+  -- Internal state
   old_buffer = nil,
   new_buffer = nil,
   dirty = nil, -- dirty flag array for tracking changes
@@ -25,8 +38,14 @@ local togagrid = {
   bits_per_led = 4   -- 4 bits = 16 brightness levels (0-15)
 }
 
-function togagrid:connect()
+function togagrid:connect(port)
   if _ENV.togagrid then return _ENV.togagrid end
+
+  -- Set port if provided
+  if port then
+    togagrid.device.port = port
+  end
+
   togagrid:init()
   _ENV.togagrid = togagrid
   return togagrid
@@ -146,7 +165,9 @@ function togagrid:init()
   -- UNCOMMENT to add default touchosc client
   --table.insert(self.dest, {"192.168.0.123",8002})
 
-  self.device = self
+  -- Initialize device reference for backward compatibility
+  self.device = self.device or {}
+
   self.old_buffer = create_packed_buffer(self.cols, self.rows, self.leds_per_word)
   self.new_buffer = create_packed_buffer(self.cols, self.rows, self.leds_per_word)
   self.dirty = create_dirty_flags(self.cols, self.rows)
@@ -163,6 +184,11 @@ function togagrid:init()
         --print("grid.key is not defined!")
       end
     end
+  end
+
+  -- Call add callback if available
+  if togagrid.add then
+    togagrid.add(self)
   end
 
   self:send_connected(nil, true)
