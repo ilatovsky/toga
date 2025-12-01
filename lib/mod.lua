@@ -104,10 +104,15 @@ end
 local function osc_handler(path, args, from)
 	local consumed = false
 
-	if path == "/toga_connection" then
+	-- Debug: print all incoming OSC
+	-- print("toga osc:", path, from[1], from[2])
+
+	if string.sub(path, 1, 16) == "/toga_connection" then
+		print("toga: connection request from " .. from[1] .. ":" .. from[2])
 		local existing_slot = find_client_slot(from)
 		if existing_slot then
 			-- already connected, just refresh
+			print("toga: client already on slot " .. existing_slot .. ", refreshing")
 			local device = toga.slots[existing_slot]
 			device:send_connected(true)
 			device:force_refresh()
@@ -115,6 +120,7 @@ local function osc_handler(path, args, from)
 			-- new client
 			local slot = find_free_slot()
 			if slot then
+				print("toga: assigning to slot " .. slot)
 				create_device(slot, { from[1], from[2] })
 			else
 				print("toga: no free slots for " .. from[1] .. ":" .. from[2])
