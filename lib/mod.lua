@@ -112,7 +112,7 @@ local function create_device(slot, client)
 	-- update vports
 	if toga.vports then
 		toga.vports[slot].device = device
-		toga.vports[slot].name = device.name or "toga"
+		toga.vports[slot].name = "t" .. client[1] .. ":" .. client[2]
 		device.key = function(x, y, z)
 			if toga.vports[slot].key then
 				toga.vports[slot].key(x, y, z)
