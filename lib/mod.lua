@@ -42,9 +42,10 @@ local function find_free_slot()
 	return nil
 end
 
-local function find_client_slot(from)
+local function find_client_slot(ip)
+	-- match by IP only (port may vary)
 	for slot, device in pairs(toga.slots) do
-		if device.client[1] == from[1] and device.client[2] == from[2] then
+		if device.client[1] == ip then
 			return slot
 		end
 	end
@@ -108,8 +109,12 @@ local function osc_handler(path, args, from)
 	-- print("toga osc:", path, from[1], from[2])
 
 	if string.sub(path, 1, 16) == "/toga_connection" then
-		print("toga: connection request from " .. from[1] .. ":" .. from[2])
-		local existing_slot = find_client_slot(from)
+		local ip = from[1]
+		local port = from[2]
+
+		print("toga: connection request from " .. ip .. ":" .. port)
+
+		local existing_slot = find_client_slot(ip)
 		if existing_slot then
 			-- already connected, just refresh
 			print("toga: client already on slot " .. existing_slot .. ", refreshing")
@@ -117,14 +122,14 @@ local function osc_handler(path, args, from)
 			device:send_connected(true)
 			device:force_refresh()
 		else
-			-- new client
+			-- new client - use IP + configured response port
 			local slot = find_free_slot()
 			if slot then
 				print("toga: assigning to slot " .. slot)
-				create_device(slot, { from[1], from[2] })
+				create_device(slot, { ip, port })
 			else
-				print("toga: no free slots for " .. from[1] .. ":" .. from[2])
-				osc.send(from, "/toga_connection", { 0.0 })
+				print("toga: no free slots for " .. ip)
+				osc.send({ ip, port }, "/toga_connection", { 0.0 })
 			end
 		end
 		-- don't consume - togaarc might need it too
@@ -135,7 +140,7 @@ local function osc_handler(path, args, from)
 			local y = (i - 1) // 16 + 1
 			local z = args[1] // 1
 
-			local slot = find_client_slot(from)
+			local slot = find_client_slot(from[1])
 			if slot then
 				local device = toga.slots[slot]
 				if device and device.key then
