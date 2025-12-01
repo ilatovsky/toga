@@ -105,7 +105,7 @@ local function create_device(slot, client)
 	-- create TogaGrid instance
 	local device = TogaGrid.new(id, client)
 	device.port = slot
-	device.name = "t " .. client[1] .. ":" .. client[2]
+	device.name = "t" .. client[1]:gsub("%D", "") .. "|" .. client[2]:gsub("%D", "")
 
 	-- store in our slots table
 	toga.slots[slot] = device
