@@ -38,14 +38,32 @@ local function grid_to_index(x, y, cols)
 end
 
 local function transform_coordinates(x, y, rotation, cols, rows)
+	-- Transform from logical coordinates to physical storage coordinates
+	-- Physical storage is always 16x8 (cols x rows)
+	--
+	-- rotation 0: no rotation, logical 16x8 -> physical 16x8
+	-- rotation 1: 90° CW, logical 8x16 -> physical 16x8
+	-- rotation 2: 180°, logical 16x8 -> physical 16x8
+	-- rotation 3: 270° CW, logical 8x16 -> physical 16x8
+
 	if rotation == 0 then
 		return x, y
 	elseif rotation == 1 then
-		return y, cols + 1 - x
+		-- 90° CW: swap and flip
+		-- logical (1,1) -> physical (1,8)
+		-- logical (8,1) -> physical (1,1)
+		-- logical (1,16) -> physical (16,8)
+		return y, rows + 1 - x
 	elseif rotation == 2 then
+		-- 180°: flip both
 		return cols + 1 - x, rows + 1 - y
 	elseif rotation == 3 then
-		return rows + 1 - y, x
+		-- 270° CW: swap and flip other way
+		-- logical (1,1) -> physical (16,1)
+		-- logical (8,1) -> physical (16,8)
+		-- logical (1,16) -> physical (1,1)
+		-- logical (8,16) -> physical (1,8)
+		return cols + 1 - y, x
 	end
 	return x, y
 end
@@ -128,7 +146,20 @@ function TogaGrid.new(id, client)
 end
 
 function TogaGrid:led(x, y, z)
-	if x < 1 or x > self.cols or y < 1 or y > self.rows then
+	-- Get logical dimensions based on rotation
+	-- Rotation 0, 2: logical is 16x8 (same as physical)
+	-- Rotation 1, 3: logical is 8x16 (swapped)
+	local logical_cols, logical_rows
+	if self.rotation_state == 1 or self.rotation_state == 3 then
+		logical_cols = self.rows -- 8
+		logical_rows = self.cols -- 16
+	else
+		logical_cols = self.cols -- 16
+		logical_rows = self.rows -- 8
+	end
+
+	-- Check bounds against logical dimensions
+	if x < 1 or x > logical_cols or y < 1 or y > logical_rows then
 		return
 	end
 
