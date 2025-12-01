@@ -2,7 +2,7 @@
 -- This script demonstrates the grid rotation functionality
 -- Place in your norns script folder and run to test rotation
 
-local toga = include("lib/togagrid")
+local toga = include("../lib/togagrid")
 
 function init()
 	-- Connect to toga grid

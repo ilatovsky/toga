@@ -18,7 +18,7 @@ local togagrid = {
   refresh_interval = 0.01667, -- 30Hz refresh rate (33ms)
 
   -- Grid rotation support (matches monome grid API)
-  rotation = 0, -- 0=0°, 1=90°, 2=180°, 3=270°
+  rotation_state = 0, -- 0=0°, 1=90°, 2=180°, 3=270°
 
   -- Packed state configuration
   leds_per_word = 8, -- 8 LEDs per 32-bit number (4 bits each = 32 bits)
@@ -245,7 +245,7 @@ end
 
 function togagrid:rotation(val)
   if val >= 0 and val <= 3 then
-    self.rotation = val
+    self.rotation_state = val
     print("Grid rotation set to " .. (val * 90) .. " degrees")
 
     -- Force refresh to apply rotation
@@ -280,7 +280,7 @@ function togagrid:led(x, y, z)
   end
 
   -- Apply rotation transformation to get storage coordinates
-  local storage_x, storage_y = transform_coordinates(x, y, self.rotation, self.cols, self.rows)
+  local storage_x, storage_y = transform_coordinates(x, y, self.rotation_state, self.cols, self.rows)
 
   -- If transformed coordinates are out of bounds, silently ignore
   -- This makes rotation "lossy" but functional for rectangular grids
@@ -381,7 +381,7 @@ function togagrid:get_info()
     leds_per_word = self.leds_per_word,
     bits_per_led = self.bits_per_led,
     memory_usage = math.ceil((self.cols * self.rows) / self.leds_per_word) * 4, -- bytes
-    rotation = self.rotation
+    rotation = self.rotation_state
   }
 end
 
