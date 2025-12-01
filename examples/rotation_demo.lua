@@ -16,18 +16,16 @@ function init()
 	function draw_test_pattern()
 		grid:all(0) -- Clear grid
 
-		-- Draw diagonal line and corner markers
+		-- Draw diagonal line (only in safe 8x8 area for rotation)
 		for i = 1, 8 do
-			if i <= grid.cols then
-				grid:led(i, i, 15) -- Diagonal
-			end
+			grid:led(i, i, 15) -- Diagonal
 		end
 
-		-- Corner markers for orientation reference
+		-- Corner markers for orientation reference (safe coordinates)
 		grid:led(1, 1, 10) -- Top-left
-		grid:led(16, 1, 8) -- Top-right
+		grid:led(8, 1, 8) -- Top-right (changed from 16,1)
 		grid:led(1, 8, 6) -- Bottom-left
-		grid:led(16, 8, 4) -- Bottom-right
+		grid:led(8, 8, 4) -- Bottom-right (changed from 16,8)
 
 		grid:refresh()
 	end

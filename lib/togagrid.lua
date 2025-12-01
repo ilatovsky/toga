@@ -90,14 +90,18 @@ local function transform_coordinates(x, y, rotation, cols, rows)
   end
 
   return new_x, new_y
-end
-
--- Get LED brightness from packed buffer using bitwise operations
+end -- Get LED brightness from packed buffer using bitwise operations
 local function get_led_from_packed(buffer, index, leds_per_word, bits_per_led)
   local word_index = math.floor((index - 1) / leds_per_word) + 1
   local led_offset = (index - 1) % leds_per_word
   local bit_shift = led_offset * bits_per_led
   local mask = (1 << bits_per_led) - 1 -- 0x0F for 4 bits
+
+  -- Bounds checking
+  if not buffer[word_index] then
+    print("Error: buffer[" .. word_index .. "] is nil, index=" .. index)
+    return 0
+  end
 
   return (buffer[word_index] >> bit_shift) & mask
 end
@@ -271,10 +275,19 @@ function togagrid:all(z)
 end
 
 function togagrid:led(x, y, z)
-  if x < 1 or x > self.cols or y < 1 or y > self.rows then return end
+  if x < 1 or x > self.cols or y < 1 or y > self.rows then
+    return -- Silently ignore out-of-bounds coordinates
+  end
 
   -- Apply rotation transformation to get storage coordinates
   local storage_x, storage_y = transform_coordinates(x, y, self.rotation, self.cols, self.rows)
+
+  -- If transformed coordinates are out of bounds, silently ignore
+  -- This makes rotation "lossy" but functional for rectangular grids
+  if storage_x < 1 or storage_x > self.cols or storage_y < 1 or storage_y > self.rows then
+    return
+  end
+
   local index = grid_to_index(storage_x, storage_y, self.cols)
   local brightness = math.max(0, math.min(15, z))
 
