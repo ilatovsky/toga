@@ -5,6 +5,8 @@
 -- Each client gets assigned to the next free slot (1-4).
 -- Scripts access toga grids via: local g = include('toga/lib/mod').connect(slot)
 
+print("toga mod: loading...")
+
 local mod = require 'core/mods'
 local TogaGrid = include 'toga/lib/togagrid_class'
 
@@ -160,12 +162,29 @@ end
 -- mod hooks
 ------------------------------------------
 
+local function hook_osc()
+	-- Only hook if not already hooked to our handler
+	if osc.event ~= osc_handler then
+		print("toga: hooking osc.event")
+		toga.original_osc_event = osc.event
+		osc.event = osc_handler
+	end
+end
+
 mod.hook.register("system_post_startup", "toga init", function()
 	print("toga: ready for connections")
-
-	toga.original_osc_event = osc.event
-	osc.event = osc_handler
+	hook_osc()
 	toga.initialized = true
+end)
+
+-- Re-hook after script loads (scripts may overwrite osc.event)
+mod.hook.register("script_pre_init", "toga osc rehook", function()
+	print("toga: script loading, will re-hook osc")
+end)
+
+mod.hook.register("script_post_init", "toga osc rehook post", function()
+	print("toga: script loaded, re-hooking osc")
+	hook_osc()
 end)
 
 mod.hook.register("system_pre_shutdown", "toga cleanup", function()
