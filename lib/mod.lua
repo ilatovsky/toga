@@ -18,9 +18,6 @@ local toga = {
 	-- connected virtual grids: slot -> TogaGrid instance
 	slots = {},
 
-	-- original osc handler
-	original_osc_event = nil,
-
 	-- mod state
 	initialized = false,
 
@@ -101,14 +98,15 @@ local function remove_device(slot)
 end
 
 ------------------------------------------
--- OSC handler
+-- mod hooks
 ------------------------------------------
 
-local function osc_handler(path, args, from)
-	local consumed = false
+-- Store original _norns.osc.event handler
+local original_norns_osc_event = nil
 
+local function toga_osc_handler(path, args, from)
 	-- Debug: print all incoming OSC
-	print("toga osc:", path, from[1], from[2])
+	-- print("toga osc:", path, from[1], from[2])
 
 	if string.sub(path, 1, 16) == "/toga_connection" then
 		local ip = from[1]
@@ -124,7 +122,7 @@ local function osc_handler(path, args, from)
 			device:send_connected(true)
 			device:force_refresh()
 		else
-			-- new client - use IP + configured response port
+			-- new client
 			local slot = find_free_slot()
 			if slot then
 				print("toga: assigning to slot " .. slot)
@@ -134,7 +132,7 @@ local function osc_handler(path, args, from)
 				osc.send({ ip, port }, "/toga_connection", { 0.0 })
 			end
 		end
-		-- don't consume - togaarc might need it too
+		-- don't return - let original handler process too (for togaarc, etc)
 	elseif string.sub(path, 1, 10) == "/togagrid/" then
 		local i = tonumber(string.sub(path, 11))
 		if i then
@@ -149,42 +147,27 @@ local function osc_handler(path, args, from)
 					device.key(x, y, z)
 				end
 			end
-			consumed = true
+			-- consumed - don't pass to original handler
+			return
 		end
 	end
 
-	if not consumed and toga.original_osc_event then
-		toga.original_osc_event(path, args, from)
-	end
-end
-
-------------------------------------------
--- mod hooks
-------------------------------------------
-
-local function hook_osc()
-	-- Only hook if not already hooked to our handler
-	if osc.event ~= osc_handler then
-		print("toga: hooking osc.event")
-		toga.original_osc_event = osc.event
-		osc.event = osc_handler
+	-- call original handler for everything else
+	if original_norns_osc_event then
+		original_norns_osc_event(path, args, from)
 	end
 end
 
 mod.hook.register("system_post_startup", "toga init", function()
-	print("toga: ready for connections")
-	hook_osc()
+	print("toga: hooking _norns.osc.event")
+
+	-- Hook into the internal _norns.osc.event (not osc.event)
+	-- This can't be overwritten by scripts
+	original_norns_osc_event = _norns.osc.event
+	_norns.osc.event = toga_osc_handler
+
 	toga.initialized = true
-end)
-
--- Re-hook after script loads (scripts may overwrite osc.event)
-mod.hook.register("script_pre_init", "toga osc rehook", function()
-	print("toga: script loading, will re-hook osc")
-end)
-
-mod.hook.register("script_post_init", "toga osc rehook post", function()
-	print("toga: script loaded, re-hooking osc")
-	hook_osc()
+	print("toga: ready for connections")
 end)
 
 mod.hook.register("system_pre_shutdown", "toga cleanup", function()
@@ -197,9 +180,10 @@ mod.hook.register("system_pre_shutdown", "toga cleanup", function()
 			end
 		end
 
-		if toga.original_osc_event then
-			osc.event = toga.original_osc_event
-			toga.original_osc_event = nil
+		-- restore original _norns.osc.event
+		if original_norns_osc_event then
+			_norns.osc.event = original_norns_osc_event
+			original_norns_osc_event = nil
 		end
 
 		toga.initialized = false
