@@ -103,7 +103,7 @@ function TogaGrid.new(id, client)
 	self.cols = 16
 	self.rows = 8
 	self.port = nil -- assigned by mod
-	self.name = "toga"
+	self.name = client[1] .. ":" .. client[2]
 	self.serial = "toga-" .. client[1] .. ":" .. client[2]
 
 	-- Client connection

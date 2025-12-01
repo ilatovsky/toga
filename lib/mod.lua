@@ -105,6 +105,7 @@ local function create_device(slot, client)
 	-- create TogaGrid instance
 	local device = TogaGrid.new(id, client)
 	device.port = slot
+	device.name = "t " .. client[1] .. ":" .. client[2]
 
 	-- store in our slots table
 	toga.slots[slot] = device
@@ -112,7 +113,7 @@ local function create_device(slot, client)
 	-- update vports
 	if toga.vports then
 		toga.vports[slot].device = device
-		toga.vports[slot].name = "t" .. client[1] .. ":" .. client[2]
+		toga.vports[slot].name = device.name
 		device.key = function(x, y, z)
 			if toga.vports[slot].key then
 				toga.vports[slot].key(x, y, z)
@@ -171,25 +172,28 @@ local function toga_osc_handler(path, args, from)
 	if string.sub(path, 1, 16) == "/toga_connection" then
 		local ip = from[1]
 		local port = from[2]
+		local connect = args[1] and args[1] == 1
 
-		print("toga: connection request from " .. ip .. ":" .. port)
+		if connect then
+			print("toga: connection request from " .. ip .. ":" .. port)
 
-		local existing_slot = find_client_slot(ip)
-		if existing_slot then
-			-- already connected, just refresh
-			print("toga: client already on slot " .. existing_slot .. ", refreshing")
-			local device = toga.slots[existing_slot]
-			device:send_connected(true)
-			device:force_refresh()
-		else
-			-- new client
-			local slot = find_free_slot()
-			if slot then
-				print("toga: assigning to slot " .. slot)
-				create_device(slot, { ip, port })
+			local existing_slot = find_client_slot(ip)
+			if existing_slot then
+				-- already connected, just refresh
+				print("toga: client already on slot " .. existing_slot .. ", refreshing")
+				local device = toga.slots[existing_slot]
+				device:send_connected(true)
+				device:force_refresh()
 			else
-				print("toga: no free slots for " .. ip)
-				osc.send({ ip, port }, "/toga_connection", { 0.0 })
+				-- new client
+				local slot = find_free_slot()
+				if slot then
+					print("toga: assigning to slot " .. slot)
+					create_device(slot, { ip, port })
+				else
+					print("toga: no free slots for " .. ip)
+					osc.send({ ip, port }, "/toga_connection", { 0.0 })
+				end
 			end
 		end
 		-- don't return - let original handler process too (for togaarc, etc)
@@ -342,7 +346,7 @@ local function update_vports()
 		local device = toga.slots[i]
 		if device then
 			toga.vports[i].device = device
-			toga.vports[i].name = "t" .. device.client[1] .. ":" .. device.client[2]
+			toga.vports[i].name = device.name
 			-- Wire up key callback
 			device.key = function(x, y, z)
 				if toga.vports[i].key then
