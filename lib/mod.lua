@@ -342,7 +342,7 @@ local function update_vports()
 		local device = toga.slots[i]
 		if device then
 			toga.vports[i].device = device
-			toga.vports[i].name = device.name or "toga"
+			toga.vports[i].name = "t" .. device.client[1] .. ":" .. device.client[2]
 			-- Wire up key callback
 			device.key = function(x, y, z)
 				if toga.vports[i].key then
