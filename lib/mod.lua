@@ -131,6 +131,9 @@ local function create_device(slot, client)
 		toga.add(toga.vports[slot])
 	end
 
+	-- redraw mod menu if open
+	mod.menu.redraw()
+
 	return device
 end
 
@@ -156,6 +159,9 @@ local function remove_device(slot)
 		toga.vports[slot].device = nil
 		toga.vports[slot].name = "none"
 	end
+
+	-- redraw mod menu if open
+	mod.menu.redraw()
 end
 
 ------------------------------------------
