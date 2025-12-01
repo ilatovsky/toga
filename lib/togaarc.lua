@@ -8,23 +8,23 @@ local togaarc = {
   encoder_pos = nil,
   dest = {},
   cleanup_done = false,
-  key = nil, -- key event callback
+  key = nil,  -- key event callback
   delta = nil -- delta event callback
 }
 
 function togaarc:connect()
-    if _ENV.togaarc then return _ENV.togaarc end
-    togaarc:init()
-    _ENV.togaarc = togaarc
-    return togaarc
+  if _ENV.togaarc then return _ENV.togaarc end
+  togaarc:init()
+  _ENV.togaarc = togaarc
+  return togaarc
 end
 
-function create_buffer(width,height)
+local function create_buffer(width, height)
   local new_buffer = {}
 
-  for r = 1,width do
+  for r = 1, width do
     new_buffer[r] = {}
-    for c = 1,height do
+    for c = 1, height do
       new_buffer[r][c] = 0
     end
   end
@@ -37,7 +37,7 @@ function togaarc:init()
   --table.insert(self.dest, {"192.168.0.123",8002})
 
   self.encoder_pos = {}
-  for i = 1,self.cols do
+  for i = 1, self.cols do
     self.encoder_pos[i] = -1
   end
 
@@ -59,12 +59,12 @@ function togaarc:init()
       end
     end
   end
-  
+
   self:send_connected(nil, true)
 end
 
-function string.starts(String,Start)
-   return string.sub(String,1,string.len(Start))==Start
+function string.starts(String, Start)
+  return string.sub(String, 1, string.len(Start)) == Start
 end
 
 function togaarc:get_encoder_delta(i, pos)
@@ -96,7 +96,7 @@ function togaarc.osc_in(path, args, from)
         end
       end
       if not added then
-        print("togaarc: add new toga client", from[1]..":"..from[2])
+        print("togaarc: add new toga client", from[1] .. ":" .. from[2])
         table.insert(togaarc.dest, from)
         togaarc:refresh(true, from)
       end
@@ -105,18 +105,18 @@ function togaarc.osc_in(path, args, from)
       -- do not consume the event so togagrid can also add the new touchosc client.
     elseif string.starts(path, "/togaarc/knob") then
       path = string.sub(path, 14)
-      x = tonumber(string.sub(path,1,1))
-      if string.starts(string.sub(path,2), "/button1") then
+      x = tonumber(string.sub(path, 1, 1))
+      if string.starts(string.sub(path, 2), "/button1") then
         --print("togaarc button", x, args[1])
         if togaarc.key then
           togaarc.key(x, args[1])
         else
           print("arc.key is not defined!")
         end
-      elseif string.starts(string.sub(path,2), "/encoder1") then
+      elseif string.starts(string.sub(path, 2), "/encoder1") then
         local delta = togaarc:get_encoder_delta(x, args[1])
         --print("togaarc encoder", x, args[1], delta)
-        delta = tonumber(string.format("%.0f", delta*500))
+        delta = tonumber(string.format("%.0f", delta * 500))
         if delta ~= 0 then
           if togaarc.delta then
             togaarc.delta(x, delta)
@@ -161,12 +161,12 @@ function togaarc:hook_cleanup()
 end
 
 function togaarc:all(z)
-  for c = 1,self.cols do
-    for r = 1,self.rows do
+  for c = 1, self.cols do
+    for r = 1, self.rows do
       self.new_buffer[c][r] = z
     end
   end
-  
+
   if self.old_arc then
     self.old_arc:all(z)
   end
@@ -198,7 +198,7 @@ function togaarc:segment(ring, from, to, level)
   local m = {}
   local sl = tau / 64
 
-  for i=1, 64 do
+  for i = 1, 64 do
     local sa = tau / 64 * (i - 1)
     local sb = tau / 64 * i
 
@@ -206,51 +206,51 @@ function togaarc:segment(ring, from, to, level)
     m[i] = util.round(o / sl * level)
     self:led(ring, i, m[i])
   end
-  
+
   -- we call old_arc:led() in togaarc:led() so no need to call old_arc:segment() here
 end
 
 function togaarc:led(x, y, z)
   if x > self.cols or y > self.rows then return end
   self.new_buffer[x][y] = z
-  
+
   if self.old_arc then
     self.old_arc:led(x, y, z)
   end
 end
 
 function togaarc:refresh(force_refresh, target_dest)
-  for c = 1,self.cols do
-    for r = 1,self.rows do
+  for c = 1, self.cols do
+    for r = 1, self.rows do
       if force_refresh or self.new_buffer[c][r] ~= self.old_buffer[c][r] then
         self.old_buffer[c][r] = self.new_buffer[c][r]
         self:update_led(c, r, target_dest)
       end
     end
   end
-  
+
   if self.old_arc then
     self.old_arc:refresh()
   end
 end
 
-function togaarc:cleanup()
-  if self.old_arc then
-    self.old_arc:cleanup()
-  end
-  self.cleanup_done = true
-end
+-- function togaarc:cleanup()
+--   if self.old_arc then
+--     self.old_arc:cleanup()
+--   end
+--   self.cleanup_done = true
+-- end
 
 function togaarc:update_led(c, r, target_dest)
   local z = self.new_buffer[c][r]
-  for g = 1,2 do
+  for g = 1, 2 do
     local addr = string.format("/togaarc/knob%d/group%d/button%d", c, g, r)
     --print("togaarc osc.send", addr, z)
     for d, dest in pairs(self.dest) do
       if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
         -- do nothing
       else
-        osc.send(dest, addr, {z / 15.0})
+        osc.send(dest, addr, { z / 15.0 })
       end
     end
   end
@@ -261,7 +261,7 @@ function togaarc:send_connected(target_dest, connected)
     if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
       -- do nothing
     else
-      osc.send(dest, "/toga_connection", {connected and 1.0 or 0.0})
+      osc.send(dest, "/toga_connection", { connected and 1.0 or 0.0 })
     end
   end
 end

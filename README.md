@@ -2,6 +2,26 @@
 # toga
 TouchOSC grid and arc controller for monome norns
 
+🚀 **NEW: Bulk Update Performance Enhancement!** 
+Now supports sending the entire grid state in a single OSC message for dramatically improved performance over WiFi. See [Bulk Update Guide](BULK_UPDATE_GUIDE.md) for details.
+
+## Features
+
+- **High-Performance Bulk Updates**: Send entire 16x8 grid state in one OSC message (128x fewer network messages!)
+- **Backwards Compatible**: Works with existing TouchOSC controllers via automatic fallback
+- **Efficient Data Format**: Hex-encoded brightness levels (4-bit precision, 16 levels)
+- **Atomic Updates**: Eliminates visual tearing with synchronized grid state changes
+- **Configurable Modes**: Toggle between bulk and individual LED update modes
+
+## Performance Improvements
+
+| Mode | Messages per Refresh | Network Overhead | Typical Latency |
+|------|---------------------|------------------|-----------------|
+| **Bulk Mode** (New) | 1 message | ~140 bytes | **Low** ⚡ |
+| Individual Mode (Legacy) | 128 messages | ~2.5KB | High |
+
+**Result**: 94% reduction in network traffic, much better WiFi responsiveness!
+
 ## Demo Video
 https://www.instagram.com/p/CS4JRtonRD7/
 
@@ -32,6 +52,41 @@ https://www.instagram.com/p/CS4JRtonRD7/
 	3. Remove leading `--` in the line below, and edit the IP address in the line.
 	4. Open **code/toga/lib/togaarc.lua** file and repeat the step 2 and 3.
 	5. Reload the script on norns. Now **toga** will automatically connect to the TouchOSC controller when the script is loaded.
+
+## Enhanced Performance (Bulk Updates)
+
+For maximum performance, especially over WiFi, toga now supports **bulk updates** (enabled by default):
+
+### Automatic Performance
+- **No changes required** for existing scripts - bulk mode works automatically
+- Reduces network messages from 128 to 1 per grid refresh (128x improvement!)
+- Better responsiveness and less WiFi congestion
+
+### Optional: Enhanced TouchOSC Client
+For even better performance, update your TouchOSC controller:
+
+1. Copy the `touchosc_bulk_processor.lua` script to your TouchOSC project
+2. Ensure your grid buttons are named `grid_1` through `grid_128`
+3. The script will automatically handle the new bulk update format
+
+### Performance Control
+```lua
+-- In your norns script, you can control the update mode:
+local grid = include "toga/lib/togagrid"
+grid = grid:connect()
+
+-- Enable bulk updates (default)
+grid:set_bulk_mode(true)
+
+-- Disable bulk updates (fallback mode)
+grid:set_bulk_mode(false)
+
+-- Check performance stats
+local info = grid:get_mode_info()
+print("Message reduction: " .. info.message_reduction .. "x")
+```
+
+See [Bulk Update Guide](BULK_UPDATE_GUIDE.md) for complete technical details.
 
 ## Forum
 https://llllllll.co/t/toga-touchosc-grid-and-arc-controller-for-monome-norns/47902

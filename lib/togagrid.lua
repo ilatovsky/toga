@@ -2,9 +2,22 @@
 --local grid = util.file_exists(_path.code.."midigrid") and include "midigrid/lib/mg_128" or grid
 
 local togagrid = {
-  device = nil, -- needed by cheat codes 2
+  -- API-compatible properties
+  name = "toga virtual grid",
+  device = {
+    id = 1,
+    cols = 16,
+    rows = 8,
+    port = 1,
+    name = "toga virtual grid",
+    serial = "toga-001"
+  },
+
+  -- Legacy properties for backward compatibility
   cols = 16,
   rows = 8,
+
+  -- Internal state
   old_buffer = nil,
   new_buffer = nil,
   dirty = nil, -- dirty flag array for tracking changes
@@ -13,61 +26,155 @@ local togagrid = {
   old_grid = nil,
   old_osc_in = nil,
   old_cleanup = nil,
-  key = nil, -- key event callback
-  last_refresh_time = 0, -- for throttling
+  key = nil,                  -- key event callback
+  last_refresh_time = 0,      -- for throttling
   refresh_interval = 0.01667, -- 30Hz refresh rate (33ms)
-  batch_sync_interval = 0.25, -- Sync one batch every 250ms
-  sync_batch_row = 1, -- Current row being synced (1-8)
-  batch_size = 1, -- Number of rows per batch
-  sync_clock_id = nil -- Background sync coroutine ID
+
+  -- Grid rotation support (matches monome grid API)
+  rotation_state = 0, -- 0=0°, 1=90°, 2=180°, 3=270°
+
+  -- Packed state configuration
+  leds_per_word = 8, -- 8 LEDs per 32-bit number (4 bits each = 32 bits)
+  bits_per_led = 4   -- 4 bits = 16 brightness levels (0-15)
 }
 
-function togagrid:connect()
-    if _ENV.togagrid then return _ENV.togagrid end
-    togagrid:init()
-    _ENV.togagrid = togagrid
-    return togagrid
-end
+function togagrid:connect(port)
+  if _ENV.togagrid then return _ENV.togagrid end
 
-function create_buffer(width,height)
-  local new_buffer = {}
-
-  for r = 1,width do
-    new_buffer[r] = {}
-    for c = 1,height do
-      new_buffer[r][c] = 0
-    end
+  -- Set port if provided
+  if port then
+    togagrid.device.port = port
   end
 
-  return new_buffer
+  togagrid:init()
+  _ENV.togagrid = togagrid
+  return togagrid
 end
 
-function create_dirty_flags(width,height)
+-- Create packed state buffer using bitwise storage
+-- Each 32-bit number stores 8 LEDs (4 bits each)
+-- For 16x8 grid (128 LEDs): 128/8 = 16 numbers
+local function create_packed_buffer(width, height, leds_per_word)
+  local total_leds = width * height
+  local num_words = math.ceil(total_leds / leds_per_word)
+  local buffer = {}
+
+  for i = 1, num_words do
+    buffer[i] = 0 -- Each word starts as 0x00000000
+  end
+
+  return buffer
+end
+
+-- Create binary dirty flags as bit array (using numbers)
+-- Each number holds 32 bits, so we need ceil(total_leds / 32) numbers
+local function create_dirty_flags(width, height)
+  local total_leds = width * height
+  local num_words = math.ceil(total_leds / 32)
   local dirty = {}
 
-  for r = 1,width do
-    dirty[r] = {}
-    for c = 1,height do
-      dirty[r][c] = false
-    end
+  for i = 1, num_words do
+    dirty[i] = 0 -- 32-bit integer, all flags initially false
   end
 
   return dirty
+end
+
+-- Convert 2D grid coordinates to LED index
+local function grid_to_index(x, y, cols)
+  return (y - 1) * cols + (x - 1) + 1
+end
+
+-- Grid rotation coordinate transformation (matches monome grid API)
+-- Transforms coordinates based on rotation state
+-- x, y are 1-based indices, returns 1-based indices
+local function transform_coordinates(x, y, rotation, cols, rows)
+  local new_x, new_y
+
+  if rotation == 0 then
+    -- 0 degrees - no rotation
+    new_x, new_y = x, y
+  elseif rotation == 1 then
+    -- 90 degrees clockwise: (x,y) -> (y, cols+1-x)
+    new_x, new_y = y, cols + 1 - x
+  elseif rotation == 2 then
+    -- 180 degrees: (x,y) -> (cols+1-x, rows+1-y)
+    new_x, new_y = cols + 1 - x, rows + 1 - y
+  elseif rotation == 3 then
+    -- 270 degrees clockwise: (x,y) -> (rows+1-y, x)
+    new_x, new_y = rows + 1 - y, x
+  else
+    -- Invalid rotation, return unchanged
+    new_x, new_y = x, y
+  end
+
+  return new_x, new_y
+end -- Get LED brightness from packed buffer using bitwise operations
+local function get_led_from_packed(buffer, index, leds_per_word, bits_per_led)
+  local word_index = math.floor((index - 1) / leds_per_word) + 1
+  local led_offset = (index - 1) % leds_per_word
+  local bit_shift = led_offset * bits_per_led
+  local mask = (1 << bits_per_led) - 1 -- 0x0F for 4 bits
+
+  -- Bounds checking
+  if not buffer[word_index] then
+    print("Error: buffer[" .. word_index .. "] is nil, index=" .. index)
+    return 0
+  end
+
+  return (buffer[word_index] >> bit_shift) & mask
+end
+
+-- Set LED brightness in packed buffer using bitwise operations
+local function set_led_in_packed(buffer, index, brightness, leds_per_word, bits_per_led)
+  local word_index = math.floor((index - 1) / leds_per_word) + 1
+  local led_offset = (index - 1) % leds_per_word
+  local bit_shift = led_offset * bits_per_led
+  local mask = (1 << bits_per_led) - 1 -- 0x0F for 4 bits
+
+  -- Clear the old value and set the new one
+  local clear_mask = ~(mask << bit_shift)
+  buffer[word_index] = (buffer[word_index] & clear_mask) | ((brightness & mask) << bit_shift)
+end
+
+-- Set dirty bit for given LED index
+local function set_dirty_bit(dirty_array, index)
+  local word_index = math.floor((index - 1) / 32) + 1
+  local bit_index = (index - 1) % 32
+  dirty_array[word_index] = dirty_array[word_index]| (1 << bit_index)
+end
+
+-- Clear all dirty bits
+local function clear_all_dirty_bits(dirty_array)
+  for i = 1, #dirty_array do
+    dirty_array[i] = 0
+  end
+end
+
+-- Check if any dirty bits are set
+local function has_dirty_bits(dirty_array)
+  for i = 1, #dirty_array do
+    if dirty_array[i] ~= 0 then
+      return true
+    end
+  end
+  return false
 end
 
 function togagrid:init()
   -- UNCOMMENT to add default touchosc client
   --table.insert(self.dest, {"192.168.0.123",8002})
 
-  self.device = self
-  self.old_buffer = create_buffer(self.cols, self.rows)
-  self.new_buffer = create_buffer(self.cols, self.rows)
+  -- Initialize device reference for backward compatibility
+  self.device = self.device or {}
+
+  self.old_buffer = create_packed_buffer(self.cols, self.rows, self.leds_per_word)
+  self.new_buffer = create_packed_buffer(self.cols, self.rows, self.leds_per_word)
   self.dirty = create_dirty_flags(self.cols, self.rows)
   self:hook_osc_in()
   self:hook_cleanup()
-  self:start_background_sync()
   self:refresh(true)
-  
+
   self.old_grid = grid.connect()
   if self.old_grid then
     self.old_grid.key = function(x, y, z)
@@ -78,56 +185,13 @@ function togagrid:init()
       end
     end
   end
-  
+
+  -- Call add callback if available
+  if togagrid.add then
+    togagrid.add(self)
+  end
+
   self:send_connected(nil, true)
-end
-
-function togagrid:start_background_sync()
-  -- Stop existing sync if running
-  if self.sync_clock_id then
-    clock.cancel(self.sync_clock_id)
-  end
-  
-  -- Start background sync coroutine
-  self.sync_clock_id = clock.run(function()
-    while not self.cleanup_done do
-      clock.sleep(self.batch_sync_interval)
-      
-      -- Only sync if we have destinations
-      if #self.dest > 0 then
-        self:sync_batch()
-      end
-    end
-  end)
-  print("togagrid: started background sync (row-based batching)")
-end
-
-function togagrid:sync_batch()
-  -- Calculate which rows to sync in this batch
-  local batch_rows = {}
-  for i = 1, self.batch_size do
-    local row = self.sync_batch_row + i - 1
-    if row <= self.rows then
-      table.insert(batch_rows, row)
-    end
-  end
-  
-  -- Sync the batch rows
-  for _, batch_row in ipairs(batch_rows) do
-    for c = 1, self.cols do
-      self:update_led(c, batch_row)
-    end
-  end
-  
-  -- Move to next batch, wrap around after last row
-  self.sync_batch_row = self.sync_batch_row + self.batch_size
-  if self.sync_batch_row > self.rows then
-    self.sync_batch_row = 1
-  end
-end
-
-function string.starts(String,Start)
-   return string.sub(String,1,string.len(Start))==Start
 end
 
 -- @static
@@ -136,7 +200,7 @@ function togagrid.osc_in(path, args, from)
   if not togagrid.cleanup_done then
     local x, y, z, i
     --print("togagrid_osc_in", dump(path), dump(args), dump(from))
-    if string.starts(path, "/toga_connection") then
+    if string.sub(path, 1, 16) == "/toga_connection" then
       print("togagrid connect!")
       local added = false
       for d, dest in pairs(togagrid.dest) do
@@ -145,17 +209,17 @@ function togagrid.osc_in(path, args, from)
         end
       end
       if not added then
-        print("togagrid: add new toga client", from[1]..":"..from[2])
+        print("togagrid: add new toga client", from[1] .. ":" .. from[2])
         table.insert(togagrid.dest, from)
         togagrid:refresh(true, from)
       end
       -- echo back anyway to update connection button value
       togagrid:send_connected(from, true)
       -- do not consume the event so togaarc can also add the new touchosc client.
-    elseif string.starts(path, "/togagrid/") then
-      i = tonumber(string.sub(path,11))
-      x = ((i-1) % 16) + 1
-      y = (i-1) // 16 + 1
+    elseif string.sub(path, 1, 10) == "/togagrid/" then
+      i = tonumber(string.sub(path, 11))
+      x = ((i - 1) % 16) + 1
+      y = (i - 1) // 16 + 1
       z = args[1] // 1
       --print("togagrid_osc_in togagrid", i, x, y, z)
       if togagrid.key then
@@ -165,17 +229,19 @@ function togagrid.osc_in(path, args, from)
       consumed = true
     end
   end
-  
+
   if not consumed then
-    -- invoking original osc.event callback
-    togagrid.old_osc_in(path, args, from)
+    -- invoking original osc.event callback if it exists
+    if togagrid.old_osc_in then
+      togagrid.old_osc_in(path, args, from)
+    end
   end
 end
 
 function togagrid:hook_osc_in()
-  if self.old_osc_in ~= nil then return end
+  if togagrid.old_osc_in ~= nil then return end
   --print("togagrid: hook old osc_in")
-  self.old_osc_in = osc.event
+  togagrid.old_osc_in = osc.event
   osc.event = togagrid.osc_in
 end
 
@@ -185,18 +251,11 @@ function togagrid.cleanup()
     togagrid.old_cleanup()
   end
   if not togagrid.cleanup_done then
-    -- Stop background sync
-    if togagrid.sync_clock_id then
-      clock.cancel(togagrid.sync_clock_id)
-      togagrid.sync_clock_id = nil
-      print("togagrid: stopped background sync")
-    end
-    
     -- Clear all LEDs before disconnecting
     print("togagrid: clearing all LEDs on script shutdown")
     togagrid:all(0)
     togagrid:refresh(true) -- Force immediate refresh to clear all LEDs
-    
+
     -- Send disconnected signal
     togagrid:send_connected(nil, false)
     togagrid.cleanup_done = true
@@ -204,24 +263,36 @@ function togagrid.cleanup()
 end
 
 function togagrid:hook_cleanup()
-  if self.old_cleanup ~= nil then return end
-  --print("togagrid: hook old cleaup")
-  self.old_cleanup = grid.cleanup
+  if togagrid.old_cleanup ~= nil then return end
+  --print("togagrid: hook old cleanup")
+  togagrid.old_cleanup = grid.cleanup
   grid.cleanup = togagrid.cleanup
 end
 
 function togagrid:rotation(val)
+  if val >= 0 and val <= 3 then
+    self.rotation_state = val
+    print("Grid rotation set to " .. (val * 90) .. " degrees")
+
+    -- Force refresh to apply rotation
+    self:refresh(true)
+  else
+    print("Error: Invalid rotation value " .. val .. ". Use 0-3 (0°, 90°, 180°, 270°)")
+  end
+
   if self.old_grid then
     self.old_grid:rotation(val)
   end
 end
 
 function togagrid:all(z)
-  for r = 1,self.rows do
-    for c = 1,self.cols do
-      self.new_buffer[c][r] = z
-      self.dirty[c][r] = true
-    end
+  local total_leds = self.cols * self.rows
+  local brightness = math.max(0, math.min(15, z))
+
+  -- Set all LEDs to same brightness using packed operations
+  for i = 1, total_leds do
+    set_led_in_packed(self.new_buffer, i, brightness, self.leds_per_word, self.bits_per_led)
+    set_dirty_bit(self.dirty, i)
   end
 
   if self.old_grid then
@@ -230,12 +301,31 @@ function togagrid:all(z)
 end
 
 function togagrid:led(x, y, z)
-  if x > self.cols or y > self.rows then return end
-  if self.new_buffer[x][y] ~= z then
-    self.new_buffer[x][y] = z
-    self.dirty[x][y] = true
+  if x < 1 or x > self.cols or y < 1 or y > self.rows then
+    return -- Silently ignore out-of-bounds coordinates
   end
-  
+
+  -- Apply rotation transformation to get storage coordinates
+  local storage_x, storage_y = transform_coordinates(x, y, self.rotation_state, self.cols, self.rows)
+
+  -- If transformed coordinates are out of bounds, silently ignore
+  -- This makes rotation "lossy" but functional for rectangular grids
+  if storage_x < 1 or storage_x > self.cols or storage_y < 1 or storage_y > self.rows then
+    return
+  end
+
+  local index = grid_to_index(storage_x, storage_y, self.cols)
+  local brightness = math.max(0, math.min(15, z))
+
+  -- Get current value using bitwise operations
+  local current = get_led_from_packed(self.new_buffer, index, self.leds_per_word, self.bits_per_led)
+
+  if current ~= brightness then
+    -- Set new value using bitwise operations
+    set_led_in_packed(self.new_buffer, index, brightness, self.leds_per_word, self.bits_per_led)
+    set_dirty_bit(self.dirty, index)
+  end
+
   if self.old_grid then
     self.old_grid:led(x, y, z)
   end
@@ -250,31 +340,19 @@ function togagrid:refresh(force_refresh, target_dest)
     end
     self.last_refresh_time = now
   end
-  
-  -- When force_refresh is true, send all cells
-  -- When force_refresh is false, only send dirty cells
-  for r = 1,self.rows do
-    for c = 1,self.cols do
-      local should_update = force_refresh or self.dirty[c][r]
-      if should_update then
-        self.old_buffer[c][r] = self.new_buffer[c][r]
-        self:update_led(c, r, target_dest)
-        if not force_refresh then
-          self.dirty[c][r] = false
-        end
-      end
+
+  -- Always use bulk update - send entire grid state in one message
+  local has_changes = force_refresh or has_dirty_bits(self.dirty)
+
+  if has_changes then
+    self:send_bulk_grid_state(target_dest)
+    -- Copy new_buffer to old_buffer (packed word by word)
+    for i = 1, #self.new_buffer do
+      self.old_buffer[i] = self.new_buffer[i]
     end
+    clear_all_dirty_bits(self.dirty)
   end
-  
-  -- Clear all dirty flags after a forced refresh
-  if force_refresh then
-    for r = 1,self.rows do
-      for c = 1,self.cols do
-        self.dirty[c][r] = false
-      end
-    end
-  end
-  
+
   if self.old_grid then
     self.old_grid:refresh()
   end
@@ -286,28 +364,51 @@ function togagrid:intensity(i)
   end
 end
 
-function togagrid:update_led(c, r, target_dest)
-  local z = self.new_buffer[c][r]
-  local i = c + (r-1) * self.cols
-  local addr = string.format("/togagrid/%d", i)
-  --print("togagrid osc.send", addr, z)
-  for d, dest in pairs(self.dest) do
-    if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
-      -- do nothing
-    else
-      osc.send(dest, addr, {z / 15.0})
-    end
-  end
-end
-
 function togagrid:send_connected(target_dest, connected)
   for d, dest in pairs(self.dest) do
     if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
       -- do nothing
     else
-      osc.send(dest, "/toga_connection", {connected and 1.0 or 0.0})
+      osc.send(dest, "/toga_connection", { connected and 1.0 or 0.0 })
     end
   end
+end
+
+-- Send entire grid state as bulk update
+function togagrid:send_bulk_grid_state(target_dest)
+  local grid_data = {}
+  local total_leds = self.cols * self.rows
+
+  -- Extract hex values from packed buffer using bitwise operations
+  for i = 1, total_leds do
+    local brightness = get_led_from_packed(self.new_buffer, i, self.leds_per_word, self.bits_per_led)
+    -- Convert to hex string (0-F)
+    grid_data[i] = string.format("%X", brightness)
+  end
+
+  -- Convert array to single string for better OSC compatibility
+  local hex_string = table.concat(grid_data)
+
+  -- Send as single OSC message with hex string
+  for d, dest in pairs(self.dest) do
+    if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
+      -- do nothing
+    else
+      osc.send(dest, "/togagrid_bulk", { hex_string })
+    end
+  end
+end
+
+-- Get grid info
+function togagrid:get_info()
+  return {
+    total_leds = self.cols * self.rows,
+    packed_words = math.ceil((self.cols * self.rows) / self.leds_per_word),
+    leds_per_word = self.leds_per_word,
+    bits_per_led = self.bits_per_led,
+    memory_usage = math.ceil((self.cols * self.rows) / self.leds_per_word) * 4, -- bytes
+    rotation = self.rotation_state
+  }
 end
 
 return togagrid
