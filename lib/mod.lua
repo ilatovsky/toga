@@ -106,7 +106,7 @@ local function osc_handler(path, args, from)
 	local consumed = false
 
 	-- Debug: print all incoming OSC
-	-- print("toga osc:", path, from[1], from[2])
+	print("toga osc:", path, from[1], from[2])
 
 	if string.sub(path, 1, 16) == "/toga_connection" then
 		local ip = from[1]
