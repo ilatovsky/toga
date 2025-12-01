@@ -206,14 +206,17 @@ local function toga_osc_handler(path, args, from)
 	elseif string.sub(path, 1, 10) == "/togagrid/" then
 		local i = tonumber(string.sub(path, 11))
 		if i then
-			local x = ((i - 1) % 16) + 1
-			local y = (i - 1) // 16 + 1
+			-- Physical coordinates from TouchOSC (always 16x8 grid)
+			local px = ((i - 1) % 16) + 1
+			local py = (i - 1) // 16 + 1
 			local z = args[1] // 1
 
 			local slot = find_client_slot(from[1])
 			if slot then
 				local device = toga.slots[slot]
 				if device and device.key then
+					-- Transform physical coords to logical coords based on rotation
+					local x, y = device:transform_key(px, py)
 					device.key(x, y, z)
 				end
 			end

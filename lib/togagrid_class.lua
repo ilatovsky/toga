@@ -226,6 +226,28 @@ function TogaGrid:rotation(val)
 	end
 end
 
+-- Transform physical key coordinates (from TouchOSC) to logical coordinates
+-- This is the inverse of transform_coordinates
+function TogaGrid:transform_key(px, py)
+	local cols, rows = self.cols, self.rows -- 16, 8
+
+	if self.rotation_state == 0 then
+		return px, py
+	elseif self.rotation_state == 1 then
+		-- Inverse of: return y, rows + 1 - x
+		-- physical (px, py) came from logical (rows + 1 - py, px)
+		return rows + 1 - py, px
+	elseif self.rotation_state == 2 then
+		-- Inverse of: return cols + 1 - x, rows + 1 - y
+		return cols + 1 - px, rows + 1 - py
+	elseif self.rotation_state == 3 then
+		-- Inverse of: return cols + 1 - y, x
+		-- physical (px, py) came from logical (py, cols + 1 - px)
+		return py, cols + 1 - px
+	end
+	return px, py
+end
+
 function TogaGrid:send_bulk_grid_state()
 	local grid_data = {}
 	local total_leds = self.cols * self.rows
