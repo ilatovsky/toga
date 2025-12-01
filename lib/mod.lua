@@ -76,6 +76,17 @@ local function create_device(slot, client)
 	-- store in our slots table
 	toga.slots[slot] = device
 
+	-- update vports
+	if toga.vports then
+		toga.vports[slot].device = device
+		toga.vports[slot].name = device.name or "toga"
+		device.key = function(x, y, z)
+			if toga.vports[slot].key then
+				toga.vports[slot].key(x, y, z)
+			end
+		end
+	end
+
 	print("toga: registered on slot " .. slot .. " (id=" .. id .. ", client=" .. client[1] .. ":" .. client[2] .. ")")
 
 	-- send connection confirmation
@@ -95,6 +106,12 @@ local function remove_device(slot)
 
 	-- clear slot
 	toga.slots[slot] = nil
+
+	-- update vports
+	if toga.vports then
+		toga.vports[slot].device = nil
+		toga.vports[slot].name = "none"
+	end
 end
 
 ------------------------------------------
@@ -276,18 +293,69 @@ mod.menu.register(mod.this_name, m)
 -- public API
 ------------------------------------------
 
--- Connect to a toga virtual grid by slot number
--- Usage: local g = include('toga/lib/mod').connect(1)
-function toga.connect(slot)
-	slot = slot or 1
-	return toga.slots[slot]
+-- vports - mirrors norns grid.vports API
+-- Scripts can use: local g = toga.vports[1]
+toga.vports = {}
+for i = 1, MAX_SLOTS do
+	toga.vports[i] = {
+		name = "none",
+		device = nil,
+		key = nil,
+
+		led = function(self, x, y, val)
+			if self.device then self.device:led(x, y, val) end
+		end,
+		all = function(self, val)
+			if self.device then self.device:all(val) end
+		end,
+		refresh = function(self)
+			if self.device then self.device:refresh() end
+		end,
+		rotation = function(self, r)
+			if self.device then self.device:rotation(r) end
+		end,
+		intensity = function(self, i)
+			if self.device then self.device:intensity(i) end
+		end,
+		cols = 16,
+		rows = 8
+	}
+end
+
+-- Update vports when slots change
+local function update_vports()
+	for i = 1, MAX_SLOTS do
+		local device = toga.slots[i]
+		if device then
+			toga.vports[i].device = device
+			toga.vports[i].name = device.name or "toga"
+			-- Wire up key callback
+			device.key = function(x, y, z)
+				if toga.vports[i].key then
+					toga.vports[i].key(x, y, z)
+				end
+			end
+		else
+			toga.vports[i].device = nil
+			toga.vports[i].name = "none"
+		end
+	end
+end
+
+-- Connect like grid.connect(port)
+-- Usage: local g = toga.connect(1)
+function toga.connect(port)
+	port = port or 1
+	update_vports()
+	return toga.vports[port]
 end
 
 -- Connect to first available toga grid
 function toga.connect_any()
+	update_vports()
 	for i = 1, MAX_SLOTS do
 		if toga.slots[i] then
-			return toga.slots[i]
+			return toga.vports[i]
 		end
 	end
 	return nil
@@ -295,6 +363,7 @@ end
 
 function toga.disconnect(slot)
 	remove_device(slot)
+	update_vports()
 end
 
 function toga.get_slots()
