@@ -80,6 +80,8 @@ local function bit_rshift(value, shift)
 	return math.floor(value / (2 ^ shift))
 end
 
+
+
 -- State tracking for differential updates (bitwise)
 local last_grid_state = nil -- Store previous grid state as hex string
 local last_grid_words = {}  -- Store previous state as packed 32-bit words (for bitwise ops)
@@ -194,7 +196,7 @@ function handle_bulk_update(hex_string)
 					if bit_and(diff_word, led_mask) ~= 0 then
 						local new_brightness = extract_led_from_word(new_word, led_in_word)
 
-						-- Update LED visual
+						-- Update LED visual (rotation handled server-side)
 						local button_address = tostring(led_index)
 						update_led_visual(button_address, new_brightness)
 
@@ -223,7 +225,7 @@ local base_brightness = 0.4
 function update_led_visual(button_address, brightness)
 	-- Ensure brightness is in valid range [0.0, 1.0]
 	-- print(brightness, type(brightness), button_address)
-	brightness = math.floor(math.max(0, math.min(16, brightness)))
+	brightness = math.clamp(math.floor(brightness), 0, 15)
 	print(brightness)
 	-- Update button color/alpha based on brightness
 	-- Using OSC address to find and update the button
@@ -306,7 +308,9 @@ function get_grid_state_info()
 		bits_per_led = BITS_PER_LED,
 		last_update = last_full_update,
 		total_changes_tracked = led_change_count,
-		optimization_type = "Bitwise XOR difference detection"
+		optimization_type = "Bitwise XOR difference detection",
+		rotation = grid_rotation,
+		rotation_degrees = grid_rotation * 90
 	}
 end
 
@@ -320,27 +324,34 @@ function reset_change_stats()
 end
 
 --[[
-Pure Packed Bitwise Integration Notes:
+Pure Packed Bitwise Integration with Server-Side Grid Rotation:
 
 1. Button Structure: Make sure your TouchOSC grid buttons have OSC addresses "/togagrid/1" through "/togagrid/128"
 
 2. Connection Button: Create a button named "toga_connection" for connection status display
 
-3. Mathematical Precision: Toga now uses pure packed bitwise storage (16 words = 64 bytes)
+3. Grid Rotation: Server-side rotation support
+   - Rotation values: 0=0°, 1=90°, 2=180°, 3=270°
+   - Use grid:rotation(val) on norns side to change orientation
+   - Grid data is sent pre-rotated - no client-side transformation needed
+   - TouchOSC displays rotated data directly
+
+4. Mathematical Precision: Toga now uses pure packed bitwise storage (16 words = 64 bytes)
    with mathematical LED indexing for ultimate performance
 
-4. Network Optimization: 99.2% message reduction (128→1 per refresh) with atomic grid updates
+5. Network Optimization: 99.2% message reduction (128→1 per refresh) with atomic grid updates
 
-5. Pure Implementation: No backward compatibility - this script works exclusively with
+6. Pure Implementation: No backward compatibility - this script works exclusively with
    toga's optimized packed bitwise format for maximum performance
 
-6. Performance Benefits:
+7. Performance Benefits:
    - Memory: 64 bytes total (vs 1024 bytes)
    - Network: 1 message per refresh (vs 128 messages)
    - Updates: Mathematical bitwise operations (vs array access)
    - Architecture: Clean, focused codebase (vs complex compatibility)
+   - Rotation: Server-side transformation, zero client overhead
 
-7. Customization: Adjust update_led_visual function for your LED brightness representation
+8. Customization: Adjust update_led_visual function for your LED brightness representation
 
-🚀 This TouchOSC script now matches toga's pure packed bitwise optimization!
+🚀 This TouchOSC script now matches toga's pure packed bitwise optimization with efficient rotation!
 --]]

@@ -17,6 +17,9 @@ local togagrid = {
   last_refresh_time = 0,      -- for throttling
   refresh_interval = 0.01667, -- 30Hz refresh rate (33ms)
 
+  -- Grid rotation support (matches monome grid API)
+  rotation = 0, -- 0=0°, 1=90°, 2=180°, 3=270°
+
   -- Packed state configuration
   leds_per_word = 8, -- 8 LEDs per 32-bit number (4 bits each = 32 bits)
   bits_per_led = 4   -- 4 bits = 16 brightness levels (0-15)
@@ -61,6 +64,32 @@ end
 -- Convert 2D grid coordinates to LED index
 local function grid_to_index(x, y, cols)
   return (y - 1) * cols + (x - 1) + 1
+end
+
+-- Grid rotation coordinate transformation (matches monome grid API)
+-- Transforms coordinates based on rotation state
+-- x, y are 1-based indices, returns 1-based indices
+local function transform_coordinates(x, y, rotation, cols, rows)
+  local new_x, new_y
+
+  if rotation == 0 then
+    -- 0 degrees - no rotation
+    new_x, new_y = x, y
+  elseif rotation == 1 then
+    -- 90 degrees clockwise: (x,y) -> (y, cols+1-x)
+    new_x, new_y = y, cols + 1 - x
+  elseif rotation == 2 then
+    -- 180 degrees: (x,y) -> (cols+1-x, rows+1-y)
+    new_x, new_y = cols + 1 - x, rows + 1 - y
+  elseif rotation == 3 then
+    -- 270 degrees clockwise: (x,y) -> (rows+1-y, x)
+    new_x, new_y = rows + 1 - y, x
+  else
+    -- Invalid rotation, return unchanged
+    new_x, new_y = x, y
+  end
+
+  return new_x, new_y
 end
 
 -- Get LED brightness from packed buffer using bitwise operations
@@ -211,6 +240,16 @@ function togagrid:hook_cleanup()
 end
 
 function togagrid:rotation(val)
+  if val >= 0 and val <= 3 then
+    self.rotation = val
+    print("Grid rotation set to " .. (val * 90) .. " degrees")
+
+    -- Force refresh to apply rotation
+    self:refresh(true)
+  else
+    print("Error: Invalid rotation value " .. val .. ". Use 0-3 (0°, 90°, 180°, 270°)")
+  end
+
   if self.old_grid then
     self.old_grid:rotation(val)
   end
@@ -234,7 +273,9 @@ end
 function togagrid:led(x, y, z)
   if x < 1 or x > self.cols or y < 1 or y > self.rows then return end
 
-  local index = grid_to_index(x, y, self.cols)
+  -- Apply rotation transformation to get storage coordinates
+  local storage_x, storage_y = transform_coordinates(x, y, self.rotation, self.cols, self.rows)
+  local index = grid_to_index(storage_x, storage_y, self.cols)
   local brightness = math.max(0, math.min(15, z))
 
   -- Get current value using bitwise operations
@@ -326,7 +367,8 @@ function togagrid:get_info()
     packed_words = math.ceil((self.cols * self.rows) / self.leds_per_word),
     leds_per_word = self.leds_per_word,
     bits_per_led = self.bits_per_led,
-    memory_usage = math.ceil((self.cols * self.rows) / self.leds_per_word) * 4 -- bytes
+    memory_usage = math.ceil((self.cols * self.rows) / self.leds_per_word) * 4, -- bytes
+    rotation = self.rotation
   }
 end
 
