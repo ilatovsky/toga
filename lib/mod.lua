@@ -22,11 +22,44 @@ local toga = {
 	initialized = false,
 
 	-- menu state
-	menu_selected = 1
+	menu_selected = 1,
+
+	-- callbacks (set by scripts)
+	add = nil, -- function(dev) called when device connects
+	remove = nil -- function(dev) called when device disconnects
 }
 
 -- max slots (norns has 4 grid ports)
 local MAX_SLOTS = 4
+
+-- vports - mirrors norns grid.vports API
+-- Must be initialized early so create_device can update it
+toga.vports = {}
+for i = 1, MAX_SLOTS do
+	toga.vports[i] = {
+		name = "none",
+		device = nil,
+		key = nil,
+
+		led = function(self, x, y, val)
+			if self.device then self.device:led(x, y, val) end
+		end,
+		all = function(self, val)
+			if self.device then self.device:all(val) end
+		end,
+		refresh = function(self)
+			if self.device then self.device:refresh() end
+		end,
+		rotation = function(self, r)
+			if self.device then self.device:rotation(r) end
+		end,
+		intensity = function(self, i)
+			if self.device then self.device:intensity(i) end
+		end,
+		cols = 16,
+		rows = 8
+	}
+end
 
 ------------------------------------------
 -- slot management
@@ -92,12 +125,22 @@ local function create_device(slot, client)
 	-- send connection confirmation
 	device:send_connected(true)
 
+	-- call add callback if set
+	if toga.add then
+		toga.add(toga.vports[slot])
+	end
+
 	return device
 end
 
 local function remove_device(slot)
 	local device = toga.slots[slot]
 	if not device then return end
+
+	-- call remove callback if set (before cleanup)
+	if toga.remove then
+		toga.remove(toga.vports[slot])
+	end
 
 	-- cleanup (clear LEDs, send disconnect)
 	device:cleanup()
@@ -292,35 +335,6 @@ mod.menu.register(mod.this_name, m)
 ------------------------------------------
 -- public API
 ------------------------------------------
-
--- vports - mirrors norns grid.vports API
--- Scripts can use: local g = toga.vports[1]
-toga.vports = {}
-for i = 1, MAX_SLOTS do
-	toga.vports[i] = {
-		name = "none",
-		device = nil,
-		key = nil,
-
-		led = function(self, x, y, val)
-			if self.device then self.device:led(x, y, val) end
-		end,
-		all = function(self, val)
-			if self.device then self.device:all(val) end
-		end,
-		refresh = function(self)
-			if self.device then self.device:refresh() end
-		end,
-		rotation = function(self, r)
-			if self.device then self.device:rotation(r) end
-		end,
-		intensity = function(self, i)
-			if self.device then self.device:intensity(i) end
-		end,
-		cols = 16,
-		rows = 8
-	}
-end
 
 -- Update vports when slots change
 local function update_vports()
