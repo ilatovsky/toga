@@ -533,4 +533,3 @@ When contributing to this project:
 - [Norns Grid API Reference](https://monome.org/docs/norns/reference/grid)
 - [SerialOSC Protocol](https://monome.org/docs/serialosc/osc/)
 - [TouchOSC Documentation](https://hexler.net/touchosc/manual)
-- [Original toga by wangpy](https://github.com/wangpy/toga) (forked from)

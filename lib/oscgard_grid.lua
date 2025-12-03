@@ -270,6 +270,7 @@ function OscgardGrid:transform_key(px, py)
 end
 
 function OscgardGrid:send_bulk_grid_state()
+	local prefix = self.prefix or "/monome"
 	local grid_data = {}
 	local total_leds = self.cols * self.rows
 
@@ -279,7 +280,7 @@ function OscgardGrid:send_bulk_grid_state()
 	end
 
 	local hex_string = table.concat(grid_data)
-	osc.send(self.client, "/oscgard_bulk", { hex_string })
+	osc.send(self.client, prefix .. "/grid/led/level/full", { hex_string })
 end
 
 -- Serialosc-compatible: Send LED level map for an 8x8 quad

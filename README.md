@@ -1,10 +1,12 @@
 # oscgard
 
-> OSC-to-grid adapter for monome norns - use TouchOSC as a grid controller
+> OSC adapter mod for monome norns - emulate Monome grid and arc via OSC
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-Transform your tablet or phone into a high-performance monome grid controller! Oscgard intercepts grid API calls and routes them to any OSC client app implementing the oscgard + monome specs.
+Transform your tablet or phone into a high-performance emulator of monome controllers! Oscgard is a norns mod that intercepts grid/arc API calls and routes them to any OSC client app implementing the oscgard spec.
+
+> **Note**: Scripts currently need to be patched to use oscgard. Transparent mod integration (no script patching) is planned for a future version.
 
 ## ✨ Features
 
@@ -13,26 +15,6 @@ Transform your tablet or phone into a high-performance monome grid controller! O
 - **👥 Multi-Client**: Up to 4 simultaneous connections
 - **✅ 100% Compatible**: Full monome grid API compliance
 - **🔌 Extensible**: Any OSC client implementing the spec can connect
-
-## 📊 Performance
-
-| Metric | Original | Oscgard | Improvement |
-|--------|----------|---------|-------------|
-| Messages/refresh | 128 | 1 | **128× fewer** |
-| Network bytes | ~2.5KB | ~140B | **94% smaller** |
-| Memory usage | 1KB+ | 64B | **94% smaller** |
-
-## 🎥 Demo
-
-[Watch on Instagram](https://www.instagram.com/p/CS4JRtonRD7/)
-
----
-
-## 📦 Installation
-
-1. Install from maiden: `;install https://github.com/ilatovsky/oscgard`
-2. Enable mod: **SYSTEM > MODS > OSCGARD** → toggle enabled
-3. Restart norns
 
 ### Script Integration
 
@@ -47,8 +29,6 @@ Or with fallback to hardware grid:
 ```lua
 local grid = util.file_exists(_path.code.."oscgard") and include("oscgard/lib/grid") or grid
 ```
-
-> **Note**: True transparent mod integration (no script patching) is a future goal.
 
 ---
 
@@ -159,16 +139,12 @@ This project uses **Spec-Driven Development**. Before contributing:
 
 ## 🔗 Links
 
-- [Original toga by wangpy](https://github.com/wangpy/toga) (this project is a fork)
 - [Monome Grid Docs](https://monome.org/docs/grid/)
 - [Norns Grid API](https://monome.org/docs/norns/reference/grid)
-- [Lines Forum](https://llllllll.co/t/oscgard-touchosc-grid-and-arc-controller-for-monome-norns/47902)
-
+- [Norns Arc API](https://monome.org/docs/norns/reference/arc)
+- [serialosc](https://monome.org/docs/serialosc/osc)
 ---
 
 ## 📄 License
 
 [GPL-3.0](LICENSE)
-
-## Forum
-https://llllllll.co/t/oscgard-touchosc-grid-and-arc-controller-for-monome-norns/47902

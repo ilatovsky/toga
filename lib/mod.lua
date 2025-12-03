@@ -146,17 +146,6 @@ local function find_any_client(ip, port)
 	return nil, nil
 end
 
-local function get_connected_slots(device_type)
-	local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
-	local list = {}
-	for i = 1, MAX_SLOTS do
-		if vports[i].device then
-			table.insert(list, i)
-		end
-	end
-	return list
-end
-
 ------------------------------------------
 -- serialosc discovery notifications
 ------------------------------------------
@@ -514,12 +503,49 @@ local function oscgard_osc_handler(path, args, from)
 		return
 	end
 
-	-- /sys/disconnect - Disconnect this client
+	-- /sys/disconnect s <serial> - Disconnect specific device by serial
+	-- /sys/disconnect - Disconnect all devices from this client
 	if path == "/sys/disconnect" then
-		local device_type, existing_slot = find_any_client(ip, port)
-		if existing_slot then
-			print("oscgard: disconnect request from " .. ip .. ":" .. port .. " (" .. device_type .. ")")
-			remove_device(existing_slot, device_type)
+		local serial = args[1]
+
+		if serial then
+			-- Disconnect specific device by serial
+			local found = false
+			for _, device_type in ipairs({ "grid", "arc" }) do
+				local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
+				for slot = 1, MAX_SLOTS do
+					local device = vports[slot].device
+					if device and device.serial == serial then
+						print("oscgard: disconnect request for serial " .. serial .. " from " .. ip .. ":" .. port)
+						remove_device(slot, device_type)
+						found = true
+						break
+					end
+				end
+				if found then break end
+			end
+			if not found then
+				print("oscgard: disconnect request for unknown serial " .. serial)
+			end
+		else
+			-- Disconnect all devices from this client (ip:port)
+			local count = 0
+			for _, device_type in ipairs({ "grid", "arc" }) do
+				local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
+				for slot = 1, MAX_SLOTS do
+					local device = vports[slot].device
+					if device and device.client[1] == ip and device.client[2] == port then
+						print("oscgard: disconnect " .. device_type .. " slot " .. slot .. " from " .. ip .. ":" .. port)
+						remove_device(slot, device_type)
+						count = count + 1
+					end
+				end
+			end
+			if count == 0 then
+				print("oscgard: disconnect request from " .. ip .. ":" .. port .. " but no devices found")
+			else
+				print("oscgard: disconnected " .. count .. " device(s) from " .. ip .. ":" .. port)
+			end
 		end
 		return
 	end

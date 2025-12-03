@@ -20,14 +20,17 @@ Note: This script uses TouchOSC API functions (osc, system, self) that are only
 available when running inside the TouchOSC environment.
 --]]
 
--- Grid configuration (will be updated on /sys/connect)
-local GRID_COLS = 16
-local GRID_ROWS = 8
-local TOTAL_LEDS = GRID_COLS * GRID_ROWS
-local grid = self:findByName('oscgard')
+math.randomseed(os.time())
 
--- Serialosc-compatible prefix (can be changed via /sys/prefix)
-local osc_prefix = "/monome"
+local charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
+
+local function randomString(length)
+	if length > 0 then
+		return randomString(length - 1) .. charset:sub(math.random(1, #charset), 1)
+	else
+		return ""
+	end
+end
 
 -- Lua 5.1 compatible bitwise operations (fixed for accuracy)
 local function bit_or(a, b)
@@ -87,6 +90,14 @@ local function bit_rshift(value, shift)
 end
 
 
+-- Grid configuration (will be updated on /sys/connect)
+local GRID_COLS = 16
+local GRID_ROWS = 8
+local TOTAL_LEDS = GRID_COLS * GRID_ROWS
+local grid = self:findByName('oscgard')
+
+-- Serialosc-compatible prefix (can be changed via /sys/prefix)
+local osc_prefix = "/" .. randomString(8)
 
 -- State tracking for differential updates (bitwise)
 local last_grid_state = nil -- Store previous grid state as hex string
@@ -106,7 +117,7 @@ local last_update_time = 0
 local total_leds_updated = 0
 
 -- Convert hex string to packed 32-bit words (like server-side)
-function hex_string_to_words(hex_string)
+local function hex_string_to_words(hex_string)
 	local words = {}
 	for word_idx = 1, WORDS_NEEDED do
 		local word_value = 0
@@ -129,7 +140,7 @@ function hex_string_to_words(hex_string)
 end
 
 -- Extract LED brightness from word using bitwise operations
-function extract_led_from_word(word, led_offset)
+local function extract_led_from_word(word, led_offset)
 	local bit_shift = led_offset * BITS_PER_LED
 	local mask = bit_lshift(1, BITS_PER_LED) - 1 -- 0x0F for 4 bits
 	local shifted_value = bit_rshift(word, bit_shift)
@@ -150,7 +161,8 @@ function onReceiveOSC(message)
 	-- OSCGARD OPTIMIZED: Bulk updates (fastest)
 	-- ========================================
 
-	if address == "/oscgard_bulk" then
+	-- <prefix>/grid/led/level/full <hex_string> - Full grid state as hex
+	if address == osc_prefix .. "/grid/led/level/full" then
 		-- Handle bulk grid state update (pure packed format)
 		handle_bulk_update(args[1].value)
 		bulk_updates_received = bulk_updates_received + 1
