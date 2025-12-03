@@ -16,7 +16,7 @@
 print("oscgard mod: loading...")
 
 local mod = require 'core/mods'
-local OscgardGrid = include 'oscgard/lib/oscgard_grid'
+local OscgardGrid = include 'oscgard_grid'
 
 ------------------------------------------
 -- state
@@ -238,7 +238,8 @@ local function create_device(slot, client, device_type, cols, rows, serial)
 	end
 
 	print("oscgard: " ..
-	device_type .. " registered on slot " .. slot .. " (id=" .. id .. ", client=" .. client[1] .. ":" .. client[2] .. ")")
+		device_type ..
+		" registered on slot " .. slot .. " (id=" .. id .. ", client=" .. client[1] .. ":" .. client[2] .. ")")
 
 	-- send connection confirmation
 	device:send_connected(true)
@@ -678,7 +679,7 @@ m.redraw = function()
 			screen.move(10, y)
 			-- Show device type, slot, and client info
 			screen.text(entry.device_type ..
-			" " .. entry.slot .. ": " .. entry.device.client[1] .. ":" .. entry.device.client[2])
+				" " .. entry.slot .. ": " .. entry.device.client[1] .. ":" .. entry.device.client[2])
 		end
 	end
 
