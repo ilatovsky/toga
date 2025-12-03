@@ -1,27 +1,33 @@
 --[[
-TouchOSC Lua Script for Oscgard Pure Packed Bitwise Implementation
+TouchOSC Lua Script for Oscgard - Serialosc Compatible Implementation
 Place this script in your TouchOSC controller to handle optimized bulk grid updates
 
-This script processes oscgard's pure packed bitwise format:
-- Receives /oscgard_bulk with array of 128 hex values (16x8 grid)
-- Receives /oscgard_compact with single packed hex string
-- Ultra-efficient single-message updates (99.2% network reduction)
-- No backward compatibility - pure performance focus
+This script processes both:
+- Oscgard optimized format: /oscgard_bulk with hex values (99.2% network reduction)
+- Serialosc standard format: /monome/grid/led/level/* messages (full compatibility)
 
-Usage:
-1. Add this script to your TouchOSC project
-2. Make sure your grid buttons have addresses "/oscgard/1" through "/oscgard/128"
-3. Enjoy 100x faster grid updates with mathematical precision!
+Connection Protocol:
+- Send /sys/connect s <serial> to connect as grid with auto dimensions
+- Send /sys/connect ss <serial> <type> to connect (type: "grid" or "arc")
+- Send /sys/connect ssii <serial> <type> <cols> <rows> for custom dimensions
+- Server responds with /sys/connect ssii <serial> <type> <cols> <rows> on success
+- Server sends /sys/disconnect s <serial> on disconnection
+
+Supported grid sizes: 64 (8x8), 128 (16x8), 256 (16x16)
+Arc support: cols = encoders (2 or 4), rows = 64 (LEDs per encoder)
 
 Note: This script uses TouchOSC API functions (osc, system, self) that are only
 available when running inside the TouchOSC environment.
 --]]
 
--- Grid configuration
+-- Grid configuration (will be updated on /sys/connect)
 local GRID_COLS = 16
 local GRID_ROWS = 8
 local TOTAL_LEDS = GRID_COLS * GRID_ROWS
 local grid = self:findByName('oscgard')
+
+-- Serialosc-compatible prefix (can be changed via /sys/prefix)
+local osc_prefix = "/monome"
 
 -- Lua 5.1 compatible bitwise operations (fixed for accuracy)
 local function bit_or(a, b)
@@ -139,14 +145,158 @@ end
 function onReceiveOSC(message)
 	local address = message[1]
 	local args = message[2]
+
+	-- ========================================
+	-- OSCGARD OPTIMIZED: Bulk updates (fastest)
+	-- ========================================
+
 	if address == "/oscgard_bulk" then
 		-- Handle bulk grid state update (pure packed format)
 		handle_bulk_update(args[1].value)
 		bulk_updates_received = bulk_updates_received + 1
 		total_leds_updated = total_leds_updated + TOTAL_LEDS
-	elseif address == "/oscgard_connection" then
-		-- Handle connection status
-		handle_connection_status(args[1])
+		return
+	end
+
+	-- ========================================
+	-- CONNECTION: /sys/connect and /sys/disconnect
+	-- ========================================
+
+	-- /sys/connect ssii <serial> <type> <cols> <rows> - Connection confirmation from server
+	if address == "/sys/connect" then
+		local serial = args[1] and (args[1].value or args[1]) or "unknown"
+		local device_type = args[2] and (args[2].value or args[2]) or "grid"
+		local cols = args[3] and (args[3].value or args[3]) or 16
+		local rows = args[4] and (args[4].value or args[4]) or 8
+		print("Connected as " .. device_type .. " (" .. cols .. "x" .. rows .. ") serial: " .. serial)
+		-- Update grid dimensions if different
+		if cols ~= GRID_COLS or rows ~= GRID_ROWS then
+			GRID_COLS = cols
+			GRID_ROWS = rows
+			TOTAL_LEDS = cols * rows
+			print("Grid dimensions updated to " .. cols .. "x" .. rows)
+		end
+		handle_connection_status(1)
+		return
+	end
+
+	-- /sys/disconnect s <serial> - Disconnection notification
+	if address == "/sys/disconnect" then
+		local serial = args[1] and (args[1].value or args[1]) or "unknown"
+		print("Disconnected from server (serial: " .. serial .. ")")
+		handle_connection_status(0)
+		return
+	end
+
+	-- ========================================
+	-- SERIALOSC STANDARD: System messages
+	-- ========================================
+
+	if address == "/sys/prefix" and args[1] then
+		-- Change OSC prefix
+		osc_prefix = args[1].value or args[1]
+		print("OSC prefix changed to: " .. osc_prefix)
+		return
+	end
+
+	if address == "/sys/rotation" and args[1] then
+		-- Rotation is handled server-side, just acknowledge
+		local degrees = args[1].value or args[1]
+		print("Rotation set to: " .. degrees .. " degrees (handled server-side)")
+		return
+	end
+
+	-- ========================================
+	-- SERIALOSC STANDARD: Grid LED messages
+	-- ========================================
+
+	-- <prefix>/grid/led/level/set x y l (0-indexed)
+	if address == osc_prefix .. "/grid/led/level/set" then
+		if args[1] and args[2] and args[3] then
+			local x = (args[1].value or args[1]) + 1 -- Convert to 1-indexed
+			local y = (args[2].value or args[2]) + 1
+			local l = args[3].value or args[3]
+			local led_index = (y - 1) * GRID_COLS + x
+			if led_index >= 1 and led_index <= TOTAL_LEDS then
+				update_led_visual(tostring(led_index), l)
+			end
+		end
+		return
+	end
+
+	-- <prefix>/grid/led/level/all l
+	if address == osc_prefix .. "/grid/led/level/all" then
+		if args[1] then
+			local l = args[1].value or args[1]
+			for i = 1, TOTAL_LEDS do
+				update_led_visual(tostring(i), l)
+			end
+		end
+		return
+	end
+
+	-- <prefix>/grid/led/level/map x_off y_off l[64] (8x8 quad)
+	if address == osc_prefix .. "/grid/led/level/map" then
+		if args[1] and args[2] then
+			local x_off = args[1].value or args[1]
+			local y_off = args[2].value or args[2]
+			-- levels start at args[3]
+			for i = 0, 63 do
+				local arg_idx = i + 3
+				if args[arg_idx] then
+					local l = args[arg_idx].value or args[arg_idx]
+					local row = math.floor(i / 8)
+					local col = i % 8
+					local x = x_off + col + 1
+					local y = y_off + row + 1
+					if x >= 1 and x <= GRID_COLS and y >= 1 and y <= GRID_ROWS then
+						local led_index = (y - 1) * GRID_COLS + x
+						update_led_visual(tostring(led_index), l)
+					end
+				end
+			end
+		end
+		return
+	end
+
+	-- <prefix>/grid/led/level/row x_off y l[...]
+	if address == osc_prefix .. "/grid/led/level/row" then
+		if args[1] and args[2] then
+			local x_off = args[1].value or args[1]
+			local y = (args[2].value or args[2]) + 1 -- Convert to 1-indexed
+			for i = 0, 15 do
+				local arg_idx = i + 3
+				if args[arg_idx] then
+					local l = args[arg_idx].value or args[arg_idx]
+					local x = x_off + i + 1
+					if x >= 1 and x <= GRID_COLS and y >= 1 and y <= GRID_ROWS then
+						local led_index = (y - 1) * GRID_COLS + x
+						update_led_visual(tostring(led_index), l)
+					end
+				end
+			end
+		end
+		return
+	end
+
+	-- <prefix>/grid/led/level/col x y_off l[...]
+	if address == osc_prefix .. "/grid/led/level/col" then
+		if args[1] and args[2] then
+			local x = (args[1].value or args[1]) + 1 -- Convert to 1-indexed
+			local y_off = args[2].value or args[2]
+			for i = 0, 7 do
+				local arg_idx = i + 3
+				if args[arg_idx] then
+					local l = args[arg_idx].value or args[arg_idx]
+					local y = y_off + i + 1
+					if x >= 1 and x <= GRID_COLS and y >= 1 and y <= GRID_ROWS then
+						local led_index = (y - 1) * GRID_COLS + x
+						update_led_visual(tostring(led_index), l)
+					end
+				end
+			end
+		end
+		return
 	end
 
 	-- Update performance stats
@@ -324,34 +474,31 @@ function reset_change_stats()
 end
 
 --[[
-Pure Packed Bitwise Integration with Server-Side Grid Rotation:
+Oscgard TouchOSC Integration - Serialosc Compatible
 
-1. Button Structure: Make sure your TouchOSC grid buttons have OSC addresses "/oscgard/1" through "/oscgard/128"
+Connection Protocol:
+   - /sys/connect s <serial> - Connect with serial (default grid 16x8)
+   - /sys/connect ss <serial> <type> - Connect with device type ("grid" or "arc")
+   - /sys/connect ssii <serial> <type> <cols> <rows> - Connect with custom dimensions
+   - /sys/disconnect s <serial> - Disconnect from server
 
-2. Connection Button: Create a button named "oscgard_connection" for connection status display
+   Supported Types:
+   - "grid": 64 (8x8), 128 (16x8), 256 (16x16)
+   - "arc": cols=encoders (2 or 4), rows=64 (LEDs per encoder)
 
-3. Grid Rotation: Server-side rotation support
+Button Structure: Grid buttons have OSC addresses "/oscgard/1" through "/oscgard/N"
+   where N = cols * rows
+
+Grid Rotation: Server-side rotation support
    - Rotation values: 0=0°, 1=90°, 2=180°, 3=270°
-   - Use grid:rotation(val) on norns side to change orientation
    - Grid data is sent pre-rotated - no client-side transformation needed
-   - TouchOSC displays rotated data directly
 
-4. Mathematical Precision: Oscgard now uses pure packed bitwise storage (16 words = 64 bytes)
-   with mathematical LED indexing for ultimate performance
+Network Optimization: 99.2% message reduction with atomic grid updates
 
-5. Network Optimization: 99.2% message reduction (128→1 per refresh) with atomic grid updates
+Serialosc Compatibility:
+   - Full /sys/* message support
+   - Standard /monome/grid/led/level/* messages
+   - Device discovery via /serialosc/list
 
-6. Pure Implementation: No backward compatibility - this script works exclusively with
-   oscgard's optimized packed bitwise format for maximum performance
-
-7. Performance Benefits:
-   - Memory: 64 bytes total (vs 1024 bytes)
-   - Network: 1 message per refresh (vs 128 messages)
-   - Updates: Mathematical bitwise operations (vs array access)
-   - Architecture: Clean, focused codebase (vs complex compatibility)
-   - Rotation: Server-side transformation, zero client overhead
-
-8. Customization: Adjust update_led_visual function for your LED brightness representation
-
-🚀 This TouchOSC script now matches oscgard's pure packed bitwise optimization with efficient rotation!
+🚀 This TouchOSC script supports both optimized oscgard bulk format and standard serialosc!
 --]]

@@ -1,4 +1,4 @@
--- oscgard_class.lua
+-- oscgard_grid.lua
 -- Virtual grid class for creating multiple independent grid instances
 -- Used by mod.lua to create per-client grids
 
@@ -113,16 +113,37 @@ end
 -- OscgardGrid class
 ------------------------------------------
 
-function OscgardGrid.new(id, client)
+-- Create new OscgardGrid instance
+-- @param id: unique device id
+-- @param client: {ip, port} tuple
+-- @param cols: number of columns (default 16)
+-- @param rows: number of rows (default 8)
+-- @param serial: optional serial number (default: generated from client)
+function OscgardGrid.new(id, client, cols, rows, serial)
 	local self = setmetatable({}, OscgardGrid)
 
 	-- Grid properties (monome API compatible)
 	self.id = id
-	self.cols = 16
-	self.rows = 8
+	self.cols = cols or 16
+	self.rows = rows or 8
 	self.port = nil -- assigned by mod
-	self.name = client[1] .. ":" .. client[2]
-	self.serial = "oscgard-" .. client[1] .. ":" .. client[2]
+	self.name = client[1]:gsub("%D", "") .. "|" .. client[2]:gsub("%D", "")
+	self.serial = serial or ("oscgard-" .. client[1] .. ":" .. client[2])
+
+	-- Derive type from dimensions
+	local total_leds = self.cols * self.rows
+	if total_leds == 64 then
+		self.type = "monome 64"
+	elseif total_leds == 128 then
+		self.type = "monome 128"
+	elseif total_leds == 256 then
+		self.type = "monome 256"
+	else
+		self.type = "monome " .. total_leds
+	end
+
+	-- Serialosc-compatible settings
+	self.prefix = "/" .. self.serial -- configurable OSC prefix
 
 	-- Client connection
 	self.client = client
@@ -261,14 +282,92 @@ function OscgardGrid:send_bulk_grid_state()
 	osc.send(self.client, "/oscgard_bulk", { hex_string })
 end
 
+-- Serialosc-compatible: Send LED level map for an 8x8 quad
+-- Arguments: x_off, y_off (must be multiples of 8), then 64 brightness values
+function OscgardGrid:send_level_map(x_off, y_off)
+	local prefix = self.prefix or "/monome"
+	local levels = {}
+
+	for row = 0, 7 do
+		for col = 0, 7 do
+			local x = x_off + col + 1
+			local y = y_off + row + 1
+			if x <= self.cols and y <= self.rows then
+				local index = grid_to_index(x, y, self.cols)
+				levels[#levels + 1] = get_led_from_packed(self.new_buffer, index)
+			else
+				levels[#levels + 1] = 0
+			end
+		end
+	end
+
+	local msg = { x_off, y_off }
+	for i = 1, 64 do
+		msg[#msg + 1] = levels[i]
+	end
+
+	osc.send(self.client, prefix .. "/grid/led/level/map", msg)
+end
+
+-- Serialosc-compatible: Send all quads as level maps
+function OscgardGrid:send_standard_grid_state()
+	-- For 16x8 grid, we have 2 quads (0,0) and (8,0)
+	self:send_level_map(0, 0)
+	self:send_level_map(8, 0)
+end
+
+-- Serialosc-compatible: Send single LED level
+function OscgardGrid:send_level_set(x, y, level)
+	local prefix = self.prefix or "/monome"
+	-- Convert to 0-indexed for serialosc standard
+	osc.send(self.client, prefix .. "/grid/led/level/set", { x - 1, y - 1, level })
+end
+
+-- Serialosc-compatible: Set all LEDs to same level
+function OscgardGrid:send_level_all(level)
+	local prefix = self.prefix or "/monome"
+	osc.send(self.client, prefix .. "/grid/led/level/all", { level })
+end
+
+-- Serialosc-compatible: Send row of LED levels
+function OscgardGrid:send_level_row(x_off, y, levels)
+	local prefix = self.prefix or "/monome"
+	local msg = { x_off, y - 1 } -- y is 0-indexed in serialosc
+	for i = 1, #levels do
+		msg[#msg + 1] = levels[i]
+	end
+	osc.send(self.client, prefix .. "/grid/led/level/row", msg)
+end
+
+-- Serialosc-compatible: Send column of LED levels
+function OscgardGrid:send_level_col(x, y_off, levels)
+	local prefix = self.prefix or "/monome"
+	local msg = { x - 1, y_off } -- x is 0-indexed in serialosc
+	for i = 1, #levels do
+		msg[#msg + 1] = levels[i]
+	end
+	osc.send(self.client, prefix .. "/grid/led/level/col", msg)
+end
+
 function OscgardGrid:send_connected(connected)
-	osc.send(self.client, "/oscgard_connection", { connected and 1.0 or 0.0 })
+	-- /sys/connect ssii <serial> <type> <cols> <rows> - Connection confirmation
+	osc.send(self.client, "/sys/connect", {
+		self.serial,
+		self.device_type or "grid",
+		self.cols,
+		self.rows
+	})
+end
+
+function OscgardGrid:send_disconnected()
+	-- /sys/disconnect s <serial> - Disconnection notification
+	osc.send(self.client, "/sys/disconnect", { self.serial })
 end
 
 function OscgardGrid:cleanup()
 	self:all(0)
 	self:force_refresh()
-	self:send_connected(false)
+	self:send_disconnected()
 end
 
 return OscgardGrid

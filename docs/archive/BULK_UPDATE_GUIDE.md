@@ -35,7 +35,7 @@ The new bulk update system sends the entire grid state in a single OSC message, 
 
 ### Client Side (TouchOSC)
 
-The `touchosc_bulk_processor.lua` script handles bulk updates efficiently:
+The `touch_osc_client_script.lua` script handles bulk updates efficiently:
 
 - Processes `/oscgard_bulk` messages with hex value arrays
 - Processes `/oscgard_compact` messages with hex strings  
@@ -111,7 +111,7 @@ print("Message reduction factor:", info.message_reduction)
 
 ### TouchOSC Integration
 
-1. Add the `touchosc_bulk_processor.lua` script to your TouchOSC project
+1. Add the `touch_osc_client_script.lua` script to your TouchOSC project
 2. Ensure grid buttons are named `grid_1` through `grid_128`
 3. The script automatically handles both bulk and individual updates
 

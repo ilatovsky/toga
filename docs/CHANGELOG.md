@@ -9,14 +9,39 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [Unreleased]
 
 ### Added
+- **Serialosc Protocol Compatibility** - Full support for monome serialosc OSC specification
+  - System messages: `/sys/info`, `/sys/prefix`, `/sys/rotation`
+  - Standard key input: `<prefix>/grid/key` (0-indexed coordinates)
+  - Standard LED output: `/grid/led/level/set|all|map|row|col`
+  - Serialosc discovery: `/serialosc/list`, `/serialosc/notify`
+- **New Connection Protocol** - `/sys/connect` and `/sys/disconnect` with serial support
+  - `/sys/connect ssii <serial> <type> <cols> <rows>` - Full specification
+  - `/sys/connect ss <serial> <type>` - With device type
+  - `/sys/connect s <serial>` - Default grid (16x8)
+  - `/sys/disconnect s <serial>` - Disconnect notification
+- Configurable OSC prefix (default `/monome`)
+- Dual protocol support - both serialosc standard AND oscgard optimized
+- Device info broadcast on connection
+- Device serial number support
 - Spec-Driven Development documentation (`docs/SPEC.md`)
 - Architecture documentation (`docs/ARCHITECTURE.md`)
 - Consolidated improvements summary (`docs/IMPROVEMENTS.md`)
 - This changelog
 
 ### Changed
+- **Renamed files** for clarity:
+  - `oscgard_class.lua` → `oscgard_grid.lua`
+  - `touchosc_bulk_processor.lua` → `touch_osc_client_script.lua`
+- **Merged vports and slots** - `vports[i].device` is now single source of truth
+- TouchOSC client now accepts both serialosc standard and oscgard bulk messages
+- Updated protocol documentation with serialosc compatibility
 - Reorganized documentation into `docs/` directory
 - Cleaned up root directory (moved improvement notes to docs)
+
+### Removed
+- Legacy `/oscgard_connection` command (replaced by `/sys/connect`)
+- `lib/oscgard.lua` - Legacy standalone grid (use mod system)
+- `lib/oscarc.lua` - Legacy arc support (arc now integrated in main protocol)
 
 ---
 
@@ -62,7 +87,7 @@ This major release transforms oscgard from a basic grid emulator into a high-per
 - Reconnection handling (reuses existing slot)
 
 #### TouchOSC Client Improvements
-- `touchosc_bulk_processor.lua` for efficient bulk updates
+- `touch_osc_client_script.lua` for efficient bulk updates
 - XOR-based differential update detection
 - Packed word storage matching server format
 - Lua 5.1 compatible bitwise operations
@@ -146,7 +171,7 @@ This is the original implementation by [wangpy](https://github.com/wangpy/toga) 
 
 **For TouchOSC users:**
 1. Update `oscgard.tosc` layout
-2. Add `touchosc_bulk_processor.lua` for full performance
+2. Add `touch_osc_client_script.lua` for full performance
 3. Reconnect after norns restart
 
 ---

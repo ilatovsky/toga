@@ -1,18 +1,18 @@
 # oscgard
 
-> TouchOSC virtual grid and arc controller for monome norns
+> OSC-to-grid adapter for monome norns - use TouchOSC as a grid controller
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
 
-Transform your tablet or phone into a high-performance monome grid controller! Oscgard creates virtual grid devices that work seamlessly with any norns script.
+Transform your tablet or phone into a high-performance monome grid controller! Oscgard intercepts grid API calls and routes them to any OSC client app implementing the oscgard + monome specs.
 
 ## ✨ Features
 
-- **🔌 Mod Support**: Install once, works with all scripts automatically
 - **⚡ High Performance**: 128× fewer network messages with bulk updates
 - **🔄 Full Rotation**: 0°, 90°, 180°, 270° support
-- **👥 Multi-Client**: Up to 4 simultaneous TouchOSC connections
+- **👥 Multi-Client**: Up to 4 simultaneous connections
 - **✅ 100% Compatible**: Full monome grid API compliance
+- **🔌 Extensible**: Any OSC client implementing the spec can connect
 
 ## 📊 Performance
 
@@ -30,22 +30,25 @@ Transform your tablet or phone into a high-performance monome grid controller! O
 
 ## 📦 Installation
 
-### Mod (Recommended)
-
 1. Install from maiden: `;install https://github.com/ilatovsky/oscgard`
-2. Enable: **SYSTEM > MODS > OSCGARD** → toggle enabled
+2. Enable mod: **SYSTEM > MODS > OSCGARD** → toggle enabled
 3. Restart norns
-4. Assign in **SYSTEM > DEVICES > GRID**
 
-Done! Works with any grid-enabled script.
+### Script Integration
 
-### Legacy (Per-Script)
-
-Add to your script before `grid.connect()`:
+Add this line at the top of scripts:
 
 ```lua
-local grid = util.file_exists(_path.code.."oscgard") and include "oscgard/lib/oscgard" or grid
+local grid = include("oscgard/lib/grid")
 ```
+
+Or with fallback to hardware grid:
+
+```lua
+local grid = util.file_exists(_path.code.."oscgard") and include("oscgard/lib/grid") or grid
+```
+
+> **Note**: True transparent mod integration (no script patching) is a future goal.
 
 ---
 
@@ -80,6 +83,43 @@ g:rotation(r)                 -- 0=0°, 1=90°, 2=180°, 3=270°
 -- Callback
 g.key = function(x, y, z)     -- Button press (z=1) / release (z=0)
   print("key", x, y, z)
+end
+
+-- Static callbacks (optional)
+grid.add = function(dev)      -- Called when any grid connects
+  print(dev.name .. " connected")
+end
+grid.remove = function(dev)   -- Called when any grid disconnects
+  print(dev.name .. " disconnected")
+end
+```
+
+---
+
+## 💡 Example Script
+
+A simple grid test that lights up buttons when pressed:
+
+```lua
+-- example: grid test
+-- lights up buttons when pressed
+
+local grid = include("oscgard/lib/grid")
+
+g = grid.connect()
+
+function init()
+  g:all(0)
+  g:refresh()
+end
+
+g.key = function(x, y, z)
+  if z == 1 then
+    g:led(x, y, 15)  -- light up on press
+  else
+    g:led(x, y, 0)   -- turn off on release
+  end
+  g:refresh()
 end
 ```
 

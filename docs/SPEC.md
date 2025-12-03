@@ -4,7 +4,7 @@
 
 ## Project Overview
 
-**Oscgard** is a virtual monome grid controller for the [norns](https://monome.org/docs/norns/) sound computer that uses [TouchOSC](https://hexler.net/touchosc) as the hardware interface, communicating via the [OSC (Open Sound Control)](https://opensoundcontrol.stanford.edu/) protocol.
+**Oscgard** is an OSC-to-grid adapter for [norns](https://monome.org/docs/norns/) that intercepts monome grid/arc API calls and routes them to any OSC client app implementing the oscgard and monome device specifications. Currently provides a [TouchOSC](https://hexler.net/touchosc) implementation with grid support.
 
 ### What is a Monome Grid?
 
@@ -18,10 +18,22 @@ The [monome grid](https://monome.org/docs/grid/) is an open, tactile instrument 
 
 ### Project Goals
 
-1. **Emulate a physical monome grid** using a tablet/phone running TouchOSC
+1. **Use a tablet/phone as a monome grid** via TouchOSC or other OSC clients
 2. **100% API compatibility** with norns grid API
 3. **High performance** over WiFi (low latency, minimal bandwidth)
-4. **Seamless integration** - works with any existing norns script without modification (via mod system)
+4. **Extensible** - any OSC client implementing the spec can connect
+
+### Current Limitations
+
+- **Scripts need patching** - add this line at the top of your script:
+  ```lua
+  local grid = include("oscgard/lib/grid")
+  ```
+  Or with fallback to hardware grid:
+  ```lua
+  local grid = util.file_exists(_path.code.."oscgard") and include("oscgard/lib/grid") or grid
+  ```
+- True transparent mod integration is a future goal
 
 ---
 
@@ -34,56 +46,131 @@ flowchart LR
     end
     
     subgraph norns["norns (Raspberry Pi)"]
-        Mod["oscgard mod<br/>+ any script"]
+        Mod["oscgard adapter<br/>+ patched script"]
     end
     
-    TouchOSC <-->|"OSC/UDP<br/>/oscgard_bulk<br/>/oscgard/{n}<br/>/oscgard_connection"| norns
+    TouchOSC <-->|"OSC/UDP<br/>Standard: /monome/grid/key<br/>Optimized: /oscgard_bulk"| norns
+```
+
+### Protocol Modes
+
+```mermaid
+flowchart TB
+    subgraph standard["Serialosc Standard Mode"]
+        direction LR
+        S1["/sys/info"] --> S2["Device Info"]
+        S3["<prefix>/grid/key"] --> S4["Key Events"]
+        S5["<prefix>/grid/led/level/*"] --> S6["LED Updates"]
+    end
+    
+    subgraph optimized["Oscgard Optimized Mode"]
+        direction LR
+        O1["/sys/connect"] --> O2["Connect/Disconnect"]
+        O3["/oscgard/{n}"] --> O4["Button Press"]
+        O5["/oscgard_bulk"] --> O6["Packed LED Update"]
+    end
 ```
 
 ### Components
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| **Mod Entry** | `lib/mod.lua` | Norns mod hooks, slot management, OSC routing |
-| **Grid Class** | `lib/oscgard_class.lua` | Per-client virtual grid instance |
-| **Legacy Grid** | `lib/oscgard.lua` | Standalone (non-mod) grid implementation |
-| **Arc Support** | `lib/oscarc.lua` | Virtual arc encoder support |
-| **TouchOSC Client** | `touchosc_bulk_processor.lua` | TouchOSC Lua script for receiving updates |
+| **Grid Module** | `lib/grid.lua` | Drop-in replacement for norns `grid` module |
+| **Mod Core** | `lib/mod.lua` | OSC routing, slot management, device lifecycle |
+| **Grid Class** | `lib/oscgard_grid.lua` | Per-client grid instance with LED storage |
+| **TouchOSC Client** | `touch_osc_client_script.lua` | TouchOSC Lua script for receiving updates |
 | **TouchOSC Layout** | `oscgard.tosc` | TouchOSC controller layout file |
 
 ---
 
 ## Protocol Specification
 
-### OSC Messages: TouchOSC → Norns
+Oscgard supports **two protocol modes** for maximum compatibility:
+
+1. **Serialosc Standard Protocol** - Compatible with any serialosc-aware client
+2. **Oscgard Optimized Protocol** - Low-bandwidth bulk updates for TouchOSC
+
+### Serialosc Standard Protocol
+
+Oscgard implements the [monome serialosc OSC specification](https://monome.org/docs/serialosc/osc/) for seamless compatibility with existing tools.
+
+#### System Messages
+
+| Address | Arguments | Direction | Description |
+|---------|-----------|-----------|-------------|
+| `/sys/info` | `s` host, `i` port | In | Request device info |
+| `/sys/info` | `s` id, `s` type, `i` port | Out | Device identification |
+| `/sys/prefix` | `s` prefix | In | Set OSC prefix |
+| `/sys/prefix` | `s` prefix | Out | Current prefix |
+| `/sys/rotation` | `i` (0,90,180,270) | In | Set rotation |
+| `/sys/rotation` | `i` rotation | Out | Current rotation |
+
+#### Key Input (Client → Norns)
 
 | Address | Arguments | Description |
 |---------|-----------|-------------|
-| `/oscgard_connection` | `f` (0.0 or 1.0) | Connection request/disconnect |
+| `<prefix>/grid/key` | `i` x, `i` y, `i` state | Button press (0-indexed, state 0 or 1) |
+
+#### LED Output (Norns → Client)
+
+| Address | Arguments | Description |
+|---------|-----------|-------------|
+| `<prefix>/grid/led/level/set` | `i` x, `i` y, `i` level | Set single LED (0-indexed, level 0-15) |
+| `<prefix>/grid/led/level/all` | `i` level | Set all LEDs to level |
+| `<prefix>/grid/led/level/map` | `i` x_off, `i` y_off, `i[64]` levels | Set 8×8 quad |
+| `<prefix>/grid/led/level/row` | `i` x_off, `i` y, `i[8]` levels | Set row of 8 LEDs |
+| `<prefix>/grid/led/level/col` | `i` x, `i` y_off, `i[8]` levels | Set column of 8 LEDs |
+
+> **Note**: Default prefix is `/monome`. Coordinates are 0-indexed per serialosc standard.
+
+### Oscgard Optimized Protocol
+
+For low-bandwidth high-performance updates, especially over WiFi:
+
+#### OSC Messages: TouchOSC → Norns
+
+| Address | Arguments | Description |
+|---------|-----------|-------------|
+| `/sys/connect` | `s` serial | Connection request (default grid 16x8) |
+| `/sys/connect` | `s` serial, `s` type | Connection with device type ("grid" or "arc") |
+| `/sys/connect` | `s` serial, `s` type, `i` cols, `i` rows | Connection with custom dimensions |
+| `/sys/disconnect` | `s` serial | Disconnect request |
 | `/oscgard/{n}` | `f` (0.0 or 1.0) | Button press (n=1-128, 1.0=down, 0.0=up) |
 
-### OSC Messages: Norns → TouchOSC
+#### OSC Messages: Norns → TouchOSC
 
 | Address | Arguments | Description |
 |---------|-----------|-------------|
-| `/oscgard_connection` | `f` (0.0 or 1.0) | Connection acknowledgment |
+| `/sys/connect` | `s` serial, `s` type, `i` cols, `i` rows | Connection confirmation |
+| `/sys/disconnect` | `s` serial | Disconnection notification |
 | `/oscgard_bulk` | `s` (hex string) | Bulk LED update (128 hex chars, 0-F each) |
 | `/oscgard_compact` | `s` (hex string) | Compact LED update (same as bulk) |
 | `/oscgard_rotation` | `i` (0-3) | Grid rotation notification |
 
-### Button Index Mapping
+### Coordinate Systems
 
-Button indices are numbered 1-128 in row-major order:
+**Serialosc Standard**: Uses 0-indexed coordinates (x: 0-15, y: 0-7)
+**Oscgard Optimized**: Uses 1-indexed button indices (1-128)
 
 ```
-Button Layout (16×8):
+Grid Layout (16×8):
+
+Serialosc (0-indexed x,y):
+  (0,0) (1,0) (2,0) ... (15,0)    ← y=0
+  (0,1) (1,1) (2,1) ... (15,1)    ← y=1
+  ...
+  (0,7) (1,7) (2,7) ... (15,7)    ← y=7
+
+Oscgard (1-indexed buttons):
   1   2   3   4   5   6   7   8   9  10  11  12  13  14  15  16    ← Row 1
  17  18  19  20  21  22  23  24  25  26  27  28  29  30  31  32    ← Row 2
  ...
 113 114 115 116 117 118 119 120 121 122 123 124 125 126 127 128    ← Row 8
 ```
 
-**Index formula**: `index = (y - 1) * 16 + x` where x,y are 1-based
+**Conversion formulas**:
+- Serialosc to button index: `index = y * 16 + x + 1`
+- Button index to serialosc: `x = (index - 1) % 16`, `y = (index - 1) // 16`
 
 ---
 
@@ -171,18 +258,27 @@ grid.remove = function(dev) -- Called when any grid disconnects
 -- Via mod system
 local oscgard = require('oscgard/lib/mod')
 
--- Connect to oscgard grid
-g = oscgard.connect(slot)    -- Connect to specific slot (1-4)
-g = oscgard.connect_any()    -- Connect to first available oscgard
+-- Grid API (matches norns grid.vports structure)
+g = oscgard.grid.connect(slot)    -- Connect to specific grid slot (1-4)
+g = oscgard.grid.connect_any()    -- Connect to first available oscgard grid
+oscgard.grid.disconnect(slot)     -- Disconnect grid from slot
+oscgard.grid.get_slots()          -- Get table of connected grids
+oscgard.grid.get_device(slot)     -- Get grid at slot
 
--- Management
-oscgard.disconnect(slot)     -- Disconnect device from slot
-oscgard.get_slots()          -- Get table of connected devices
-oscgard.get_device(slot)     -- Get device at slot
+-- Grid Callbacks (set before script init)
+oscgard.grid.add = function(dev)    -- Called when oscgard grid connects
+oscgard.grid.remove = function(dev) -- Called when oscgard grid disconnects
 
--- Callbacks (set before script init)
-oscgard.add = function(dev)    -- Called when oscgard connects
-oscgard.remove = function(dev) -- Called when oscgard disconnects
+-- Arc API (matches norns arc.vports structure)
+a = oscgard.arc.connect(slot)     -- Connect to specific arc slot (1-4)
+a = oscgard.arc.connect_any()     -- Connect to first available oscgard arc
+oscgard.arc.disconnect(slot)      -- Disconnect arc from slot
+oscgard.arc.get_slots()           -- Get table of connected arcs
+oscgard.arc.get_device(slot)      -- Get arc at slot
+
+-- Arc Callbacks (set before script init)
+oscgard.arc.add = function(dev)    -- Called when oscgard arc connects
+oscgard.arc.remove = function(dev) -- Called when oscgard arc disconnects
 ```
 
 ---
@@ -369,7 +465,7 @@ end
 
 ### Connection Handling
 
-- No free slots: Send `/oscgard_connection` with `0.0`
+- No free slots: Send `/sys/connect` with `0` (refused)
 - Client reconnect: Refresh existing connection instead of creating new
 - Null safety: Check `device.key` before calling
 
@@ -380,20 +476,22 @@ end
 ```
 oscgard/
 ├── lib/
-│   ├── mod.lua              # Norns mod entry point
-│   ├── oscgard_class.lua   # Virtual grid class
-│   ├── oscgard.lua         # Legacy standalone grid
-│   └── oscarc.lua          # Virtual arc support
+│   ├── grid.lua             # Drop-in grid module replacement (main entrypoint)
+│   ├── mod.lua              # Norns mod, OSC routing, slot management
+│   └── oscgard_grid.lua     # Per-client grid instance class
 ├── examples/
-│   ├── performance_test.lua # Performance benchmarks
-│   ├── rotation_demo.lua    # Rotation demonstration
-│   └── oscgard_perf_test.lua   # Automated tests
+│   ├── flat_array_benchmark.lua # Performance benchmarks
+│   ├── oscgard_perf_test.lua    # Automated tests
+│   ├── performance_test.lua     # Performance tests
+│   └── rotation_demo.lua        # Rotation demonstration
 ├── docs/
 │   ├── SPEC.md              # This specification
 │   ├── ARCHITECTURE.md      # System architecture details
-│   └── CHANGELOG.md         # Version history
-├── oscgard.tosc                # TouchOSC layout
-├── touchosc_bulk_processor.lua  # TouchOSC client script
+│   ├── CHANGELOG.md         # Version history
+│   ├── IMPROVEMENTS.md      # Improvement notes
+│   └── archive/             # Archived documentation
+├── oscgard.tosc             # TouchOSC layout
+├── touch_osc_client_script.lua  # TouchOSC client script
 ├── README.md                # User documentation
 └── LICENSE                  # GPL-3.0
 ```

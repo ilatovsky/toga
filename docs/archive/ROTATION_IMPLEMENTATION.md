@@ -19,7 +19,7 @@ The rotation system transforms LED coordinates in real-time to support 4 orienta
 - Added `rotation(val)` method matching monome grid API
 - Added `send_rotation()` to notify TouchOSC clients
 
-### Client Side (touchosc_bulk_processor.lua)
+### Client Side (touch_osc_client_script.lua)
 - Added rotation state tracking and coordinate transformation functions
 - Implemented OSC message handling for `/oscgard_rotation`
 - Added real-time coordinate mapping for LED display updates
@@ -84,7 +84,7 @@ end
 ## Files Modified
 
 - `lib/oscgard.lua`: Added rotation state and coordinate transformation
-- `touchosc_bulk_processor.lua`: Added client-side rotation support
+- `touch_osc_client_script.lua`: Added client-side rotation support
 - `rotation_demo.lua`: Example script demonstrating rotation usage
 
 ## Testing

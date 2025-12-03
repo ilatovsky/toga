@@ -6,29 +6,31 @@ This document provides a detailed technical breakdown of how oscgard works, suit
 
 ## System Overview
 
-Oscgard creates virtual monome grid devices that norns scripts can use exactly like physical hardware. The system bridges TouchOSC (running on iOS/Android) with norns over WiFi using OSC messages.
+Oscgard is an mod that intercepts monome grid/arc API calls and routes them to any OSC client app implementing the oscgard and monome device specifications. Currently, a TouchOSC implementation with grid support is provided.
+
+> **Note**: Scripts currently need to be patched to use oscgard. This may change in future versions.
 
 ```mermaid
 flowchart TB
     subgraph TouchOSC["TouchOSC Device"]
         direction TB
-        BulkProcessor["touchosc_bulk_processor.lua<br/>• Receives /oscgard_bulk messages<br/>• XOR-based differential updates<br/>• Updates only changed LEDs"]
-        Layout["oscgard.tosc Layout<br/>• 128 buttons /oscgard/1-128<br/>• Connection button /oscgard_connection"]
+        BulkProcessor["touch_osc_client_script.lua<br/>• Receives /oscgard_bulk messages<br/>• XOR-based differential updates<br/>• Updates only changed LEDs"]
+        Layout["oscgard.tosc Layout<br/>• 128 buttons /oscgard/1-128<br/>• Connection via /sys/connect"]
     end
     
     subgraph norns["norns"]
         direction TB
-        Mod["lib/mod.lua<br/>• Hooks _norns.osc.event<br/>• Routes /oscgard_* messages<br/>• Manages slots 1-4<br/>• Creates OscgardGrid instances"]
-        GridClass["lib/oscgard_class.lua<br/>• Per-client grid instance<br/>• Packed bitwise LED storage<br/>• Coordinate transformation<br/>• Bulk OSC transmission"]
-        VPorts["oscgard.vports[1-4]<br/>• Virtual port interface<br/>• Matches grid.vports API<br/>• Delegates to OscgardGrid"]
-        UserScript["User Script<br/>g = grid.connect()<br/>g:led(x, y, brightness)<br/>g:refresh()"]
+        Mod["lib/mod.lua<br/>• Hooks _norns.osc.event<br/>• Routes /oscgard_* messages<br/>• Manages slots 1-4 per device type<br/>• Creates OscgardGrid instances"]
+        GridClass["lib/oscgard_grid.lua<br/>• Per-client grid instance<br/>• Packed bitwise LED storage<br/>• Coordinate transformation<br/>• Bulk OSC transmission"]
+        VPorts["oscgard.grid.vports[1-4]<br/>oscgard.arc.vports[1-4]<br/>• Virtual port interfaces<br/>• Matches grid.vports/arc.vports API<br/>• Delegates to device instances"]
+        UserScript["User Script (patched)<br/>local grid = include 'oscgard/lib/grid'<br/>g = grid.connect()<br/>g:led(x, y, brightness)<br/>g:refresh()"]
         
         Mod --> GridClass
         GridClass --> VPorts
         VPorts --> UserScript
     end
     
-    TouchOSC <-->|"UDP/OSC over WiFi<br/>Port 10111 (norns receives)<br/>Port 8002 (TouchOSC receives)"| norns
+    TouchOSC <-->|"UDP/OSC over WiFi<br/>Norns port 10111 (default), Client port passes with connect command"| norns
 ```
 
 ---
@@ -58,15 +60,17 @@ Key point: We hook `_norns.osc.event` not `osc.event` because:
 
 ```lua
 local function oscgard_osc_handler(path, args, from)
-    if path:sub(1,16) == "/oscgard_connection" then
+    if path == "/sys/connect" then
         -- Handle connection request
-        local slot = find_free_slot()
-        create_device(slot, {from[1], from[2]})
-    elseif path:sub(1,10) == "/oscgard/" then
+        local serial = args[1]
+        local device_type = args[2] or "grid"
+        local slot = find_free_slot(device_type)
+        create_device(slot, {from[1], from[2]}, device_type, cols, rows, serial)
+    elseif path:sub(1,9) == "/oscgard/" then
         -- Handle button press
-        local i = tonumber(path:sub(11))
-        local slot = find_client_slot(from[1])
-        local device = oscgard.slots[slot]
+        local i = tonumber(path:sub(10))
+        local device_type, slot = find_any_client(from[1], from[2])
+        local device = oscgard[device_type].vports[slot].device
         -- Transform coords and call key handler
         device.key(x, y, z)
         return  -- Consumed, don't pass to original
@@ -79,22 +83,40 @@ end
 #### Slot Management
 
 ```lua
--- Up to 4 slots matching norns grid port limit
+-- Up to 4 slots per device type (matching norns grid/arc port limits)
 local MAX_SLOTS = 4
-oscgard.slots = {}  -- slot -> OscgardGrid instance
 
--- Find existing client by IP
-local function find_client_slot(ip)
-    for slot, device in pairs(oscgard.slots) do
-        if device.client[1] == ip then return slot end
+-- Separate vports for grids and arcs (matches norns architecture)
+-- vports[i].device is the single source of truth for connected devices
+
+-- Find existing client by IP, port, and device type
+local function find_client_slot(ip, port, device_type)
+    local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
+    for i = 1, MAX_SLOTS do
+        local device = vports[i].device
+        if device and device.client[1] == ip and device.client[2] == port then
+            return i
+        end
     end
     return nil
 end
 
--- Find first available slot
-local function find_free_slot()
+-- Search for client across all device types
+local function find_any_client(ip, port)
+    for _, device_type in ipairs({ "grid", "arc" }) do
+        local slot = find_client_slot(ip, port, device_type)
+        if slot then
+            return device_type, slot
+        end
+    end
+    return nil, nil
+end
+
+-- Find first available slot for a device type
+local function find_free_slot(device_type)
+    local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
     for i = 1, MAX_SLOTS do
-        if not oscgard.slots[i] then return i end
+        if not vports[i].device then return i end
     end
     return nil
 end
@@ -103,29 +125,38 @@ end
 #### Virtual Ports
 
 ```lua
--- Initialize vports (like norns grid.vports)
-oscgard.vports = {}
-for i = 1, MAX_SLOTS do
-    oscgard.vports[i] = {
-        name = "none",
-        device = nil,
-        key = nil,  -- Script sets this
-        
-        -- Delegate methods to actual device
-        led = function(self, x, y, val)
-            if self.device then self.device:led(x, y, val) end
-        end,
-        refresh = function(self)
-            if self.device then self.device:refresh() end
-        end,
-        -- ... etc
-    }
+-- Initialize vports for a device type (like norns grid.vports / arc.vports)
+-- vports[i].device stores the device instance (single source of truth)
+local function init_vports(device_type)
+    local vports = {}
+    for i = 1, MAX_SLOTS do
+        vports[i] = {
+            name = "none",
+            device = nil,  -- Device instance when connected
+            key = nil,     -- Script sets this (grid button callback)
+            delta = nil,   -- Script sets this (arc encoder callback)
+            
+            -- Delegate methods to actual device
+            led = function(self, x, y, val)
+                if self.device then self.device:led(x, y, val) end
+            end,
+            refresh = function(self)
+                if self.device then self.device:refresh() end
+            end,
+            -- ... etc
+        }
+    end
+    return vports
 end
+
+-- Create separate vports for grids and arcs
+oscgard.grid = { vports = init_vports("grid"), add = nil, remove = nil }
+oscgard.arc = { vports = init_vports("arc"), add = nil, remove = nil }
 ```
 
 ---
 
-### 2. Grid Class (`lib/oscgard_class.lua`)
+### 2. Grid Class (`lib/oscgard_grid.lua`)
 
 Each connected TouchOSC client gets its own OscgardGrid instance.
 
@@ -233,7 +264,7 @@ end
 
 ---
 
-### 3. TouchOSC Client (`touchosc_bulk_processor.lua`)
+### 3. TouchOSC Client (`touch_osc_client_script.lua`)
 
 The TouchOSC Lua script receives bulk updates and efficiently updates the UI.
 
@@ -407,11 +438,11 @@ Total: 4 words × 32 bits = 128 bits
 ```mermaid
 stateDiagram-v2
     [*] --> Disconnected
-    Disconnected --> Connecting: /oscgard_connection [1.0]
+    Disconnected --> Connecting: /sys/connect
     Connecting --> Connected: find_free_slot() → create_device()
     Connected --> Connected: /oscgard/* messages<br/>g:refresh() → /oscgard_bulk
-    Connected --> Connected: /oscgard_connection [1.0] (reconnect)
-    Connected --> Disconnecting: /oscgard_connection [0.0]<br/>or mod shutdown
+    Connected --> Connected: /sys/connect (reconnect)
+    Connected --> Disconnecting: /sys/disconnect<br/>or mod shutdown
     Disconnecting --> Disconnected: remove_device()
 ```
 

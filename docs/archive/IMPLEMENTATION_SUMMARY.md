@@ -40,7 +40,7 @@
   oscgard:get_mode_info()           -- Performance statistics
   ```
 
-### 2. **TouchOSC Client Script** (`touchosc_bulk_processor.lua`)
+### 2. **TouchOSC Client Script** (`touch_osc_client_script.lua`)
 - Complete Lua script for TouchOSC controllers
 - Processes bulk updates efficiently
 - Handles both new and legacy message formats
@@ -117,7 +117,7 @@ print("Message reduction: " .. info.message_reduction .. "x")
 
 ### For TouchOSC Users
 1. **Immediate benefit**: Works with existing controllers (automatic fallback)
-2. **Enhanced performance**: Copy `touchosc_bulk_processor.lua` to your TouchOSC project
+2. **Enhanced performance**: Copy `touch_osc_client_script.lua` to your TouchOSC project
 3. **Requirements**: Grid buttons named `grid_1` through `grid_128`
 
 ## Impact on User Experience
