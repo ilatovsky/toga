@@ -13,6 +13,11 @@
 -- Or with hardware fallback:
 --   local grid = util.file_exists(_path.code.."oscgard") and include("oscgard/lib/grid") or grid
 
+-- Prevent multiple loading
+if _G.oscgard_mod_loaded then
+	return _G.oscgard_mod_instance
+end
+
 print("oscgard mod: loading...")
 
 local mod = require 'core/mods'
@@ -586,53 +591,69 @@ local function oscgard_osc_handler(path, args, from)
 	end
 end
 
-mod.hook.register("system_post_startup", "oscgard init", function()
-	print("oscgard: hooking _norns.osc.event")
+-- Initialize OSC handler immediately (for script include mode)
+-- This allows oscgard to work even when not loaded as a mod
+local function init_osc_handler()
+	if not oscgard.initialized and _norns and _norns.osc then
+		print("oscgard: hooking _norns.osc.event")
+		original_norns_osc_event = _norns.osc.event
+		_norns.osc.event = oscgard_osc_handler
+		oscgard.initialized = true
+		print("oscgard: ready for connections")
+	end
+end
 
-	-- Hook into the internal _norns.osc.event (not osc.event)
-	-- This can't be overwritten by scripts
-	original_norns_osc_event = _norns.osc.event
-	_norns.osc.event = oscgard_osc_handler
+-- Try to initialize immediately (works when included from script after system startup)
+init_osc_handler()
 
-	oscgard.initialized = true
-	print("oscgard: ready for connections")
-end)
+-- Also register hooks for proper mod loading (only if mod system is available)
+if mod and mod.hook and mod.hook.register then
+	-- Check if hooks are already registered by looking for our init flag
+	if not _G.oscgard_hooks_registered then
+		_G.oscgard_hooks_registered = true
 
-mod.hook.register("system_pre_shutdown", "oscgard cleanup", function()
-	print("oscgard: shutdown")
+		mod.hook.register("system_post_startup", "oscgard init", function()
+			init_osc_handler()
+		end)
 
-	if oscgard.initialized then
-		-- Cleanup both grid and arc devices
-		for _, device_type in ipairs({ "grid", "arc" }) do
-			for slot = 1, MAX_SLOTS do
-				if oscgard[device_type].vports[slot].device then
-					remove_device(slot, device_type)
+		mod.hook.register("system_pre_shutdown", "oscgard cleanup", function()
+			print("oscgard: shutdown")
+
+			if oscgard.initialized then
+				-- Cleanup both grid and arc devices
+				for _, device_type in ipairs({ "grid", "arc" }) do
+					for slot = 1, MAX_SLOTS do
+						if oscgard[device_type].vports[slot].device then
+							remove_device(slot, device_type)
+						end
+					end
+				end
+
+				-- restore original _norns.osc.event
+				if original_norns_osc_event then
+					_norns.osc.event = original_norns_osc_event
+					original_norns_osc_event = nil
+				end
+
+				oscgard.initialized = false
+			end
+		end)
+
+		mod.hook.register("script_post_cleanup", "oscgard script cleanup", function()
+			print("calling: oscgard script cleanup")
+			-- Clear both grid and arc devices when script changes
+			for _, device_type in ipairs({ "grid", "arc" }) do
+				for i = 1, MAX_SLOTS do
+					local device = oscgard[device_type].vports[i].device
+					if device then
+						device:all(0)
+						device:force_refresh()
+					end
 				end
 			end
-		end
-
-		-- restore original _norns.osc.event
-		if original_norns_osc_event then
-			_norns.osc.event = original_norns_osc_event
-			original_norns_osc_event = nil
-		end
-
-		oscgard.initialized = false
+		end)
 	end
-end)
-
-mod.hook.register("script_post_cleanup", "oscgard script cleanup", function()
-	-- Clear both grid and arc devices when script changes
-	for _, device_type in ipairs({ "grid", "arc" }) do
-		for i = 1, MAX_SLOTS do
-			local device = oscgard[device_type].vports[i].device
-			if device then
-				device:all(0)
-				device:force_refresh()
-			end
-		end
-	end
-end)
+end
 
 ------------------------------------------
 -- mod menu
@@ -787,5 +808,9 @@ end
 function oscgard.arc.get_device(slot)
 	return oscgard.arc.vports[slot] and oscgard.arc.vports[slot].device
 end
+
+-- Mark as loaded and store instance for reuse
+_G.oscgard_mod_loaded = true
+_G.oscgard_mod_instance = oscgard
 
 return oscgard

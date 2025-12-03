@@ -22,6 +22,13 @@ available when running inside the TouchOSC environment.
 
 math.randomseed(os.time())
 
+-- Set to true to enable debug prints
+local DEBUG = false
+
+local function debugPrint(...)
+	if DEBUG then print(...) end
+end
+
 local charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890"
 
 local function randomString(length)
@@ -94,10 +101,16 @@ end
 local GRID_COLS = 16
 local GRID_ROWS = 8
 local TOTAL_LEDS = GRID_COLS * GRID_ROWS
-local grid = self:findByName('oscgard')
+local gridButtonsContainer = self:findByName('sleipnir')
 
--- Serialosc-compatible prefix (can be changed via /sys/prefix)
-local osc_prefix = "/" .. randomString(8)
+-- Device serial (generated once, used for connection)
+local device_serial = "sleipnir-" .. randomString(8)
+
+-- Serialosc-compatible prefix (will be updated to match serial on connection)
+local osc_prefix = "/" .. device_serial
+
+-- Connection state
+local is_connected = false
 
 -- State tracking for differential updates (bitwise)
 local last_grid_state = nil -- Store previous grid state as hex string
@@ -180,13 +193,18 @@ function onReceiveOSC(message)
 		local device_type = args[2] and (args[2].value or args[2]) or "grid"
 		local cols = args[3] and (args[3].value or args[3]) or 16
 		local rows = args[4] and (args[4].value or args[4]) or 8
-		print("Connected as " .. device_type .. " (" .. cols .. "x" .. rows .. ") serial: " .. serial)
+
+		-- Update OSC prefix to match server's serial-based prefix
+		osc_prefix = "/" .. serial
+		debugPrint("OSC prefix updated to: " .. osc_prefix)
+
+		debugPrint("Connected as " .. device_type .. " (" .. cols .. "x" .. rows .. ") serial: " .. serial)
 		-- Update grid dimensions if different
 		if cols ~= GRID_COLS or rows ~= GRID_ROWS then
 			GRID_COLS = cols
 			GRID_ROWS = rows
 			TOTAL_LEDS = cols * rows
-			print("Grid dimensions updated to " .. cols .. "x" .. rows)
+			debugPrint("Grid dimensions updated to " .. cols .. "x" .. rows)
 		end
 		handle_connection_status(1)
 		return
@@ -195,7 +213,7 @@ function onReceiveOSC(message)
 	-- /sys/disconnect s <serial> - Disconnection notification
 	if address == "/sys/disconnect" then
 		local serial = args[1] and (args[1].value or args[1]) or "unknown"
-		print("Disconnected from server (serial: " .. serial .. ")")
+		debugPrint("Disconnected from server (serial: " .. serial .. ")")
 		handle_connection_status(0)
 		return
 	end
@@ -207,14 +225,14 @@ function onReceiveOSC(message)
 	if address == "/sys/prefix" and args[1] then
 		-- Change OSC prefix
 		osc_prefix = args[1].value or args[1]
-		print("OSC prefix changed to: " .. osc_prefix)
+		debugPrint("OSC prefix changed to: " .. osc_prefix)
 		return
 	end
 
 	if address == "/sys/rotation" and args[1] then
 		-- Rotation is handled server-side, just acknowledge
 		local degrees = args[1].value or args[1]
-		print("Rotation set to: " .. degrees .. " degrees (handled server-side)")
+		debugPrint("Rotation set to: " .. degrees .. " degrees (handled server-side)")
 		return
 	end
 
@@ -318,7 +336,7 @@ end
 -- Process bulk update with single hex string (128 characters)
 function handle_bulk_update(hex_string)
 	if not hex_string or string.len(hex_string) ~= TOTAL_LEDS then
-		print("Error: Expected " ..
+		debugPrint("Error: Expected " ..
 			TOTAL_LEDS .. " hex characters, got " .. (hex_string and string.len(hex_string) or "nil"))
 		return
 	end
@@ -386,12 +404,11 @@ local base_brightness = 0.4
 -- Update LED visual appearance using OSC address
 function update_led_visual(button_address, brightness)
 	-- Ensure brightness is in valid range [0.0, 1.0]
-	-- print(brightness, type(brightness), button_address)
 	brightness = math.clamp(math.floor(brightness), 0, 15)
-	print(brightness)
+	debugPrint("LED " .. button_address .. " -> " .. brightness)
 	-- Update button color/alpha based on brightness
 	-- Using OSC address to find and update the button
-	local button = grid:findByName(button_address)
+	local button = gridButtonsContainer:findByName(button_address)
 
 	if button then
 		button.color = Color(1, 1, 1, base_brightness + (1 - base_brightness) / 15 * brightness)
@@ -400,32 +417,39 @@ end
 
 -- Handle connection status updates
 function handle_connection_status(connected)
-	-- local status = (connected == 1.0)
-	-- print("Oscgard connection status:", status and "Connected" or "Disconnected")
+	is_connected = (connected == 1)
 
-	-- -- Update connection indicator if you have one (can use name or address)
-	-- local connection_button = self:findByName("oscgard_connection") or self:findByAddress("/oscgard_connection")
-	-- if connection_button then
+	-- Update connection button visual
+	local connection_button = self:findByName("oscgard_connection")
+	if connection_button then
+		if is_connected then
+			connection_button.color = Color(0, 1, 0, 1) -- Green when connected
+		else
+			connection_button.color = Color(1, 0, 0, 0.5) -- Red when disconnected
+		end
+	end
+
+	-- Clear grid on connection/disconnection
 	handle_bulk_update(string.rep('0', 128))
-	-- connection_button.values.x = connected
-	-- connection_button.color = status and Color(0, 1, 0, 1) or Color(1, 0, 0, 0.5)
-	-- end
 end
 
--- -- Grid button press handler
--- function grid_button_pressed(button_index, pressed)
---  -- Send button press to norns
---  local osc_address = "/oscgard/" .. button_index
---  local osc_value = pressed and 1.0 or 0.0
+-- Handle connection button press - send /sys/connect to server
+function onValueChanged(key)
+	local connection_button = self:findByName("oscgard_connection")
+	if connection_button and key == connection_button.values.x then
+		if connection_button.values.x == 1 then
+			-- Button pressed - send connect request
+			debugPrint("Sending /sys/connect with serial: " .. device_serial)
+			sendOSC("/sys/connect", device_serial, "grid", GRID_COLS, GRID_ROWS)
+		end
+	end
+end
 
---  -- Send to all configured norns destinations
---  osc.send("192.168.0.123", 10111, osc_address, osc_value)
--- end
-
--- Performance monitoring (pure implementation stats)
--- function get_performance_stats()
--- 	local total_messages = bulk_updates_received + compact_updates_received
--- 	local equivalent_individual_messages = total_leds_updated
+-- Helper to send OSC messages
+function sendOSC(address, ...)
+	local args = { ... }
+	osc.send(address, args)
+end
 
 -- Performance monitoring (differential update stats)
 function get_performance_stats()
@@ -471,8 +495,8 @@ function get_grid_state_info()
 		last_update = last_full_update,
 		total_changes_tracked = led_change_count,
 		optimization_type = "Bitwise XOR difference detection",
-		rotation = grid_rotation,
-		rotation_degrees = grid_rotation * 90
+		is_connected = is_connected,
+		device_serial = device_serial
 	}
 end
 
@@ -482,7 +506,7 @@ function reset_change_stats()
 	bulk_updates_received = 0
 	compact_updates_received = 0
 	total_leds_updated = 0
-	print("Change tracking statistics reset")
+	debugPrint("Change tracking statistics reset")
 end
 
 --[[
