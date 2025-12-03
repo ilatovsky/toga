@@ -1,8 +1,8 @@
-# Toga Grid Bulk Update Performance Enhancement
+# Oscgard Grid Bulk Update Performance Enhancement
 
 ## Overview
 
-This enhancement addresses the performance bottleneck in the original toga implementation where each LED required a separate OSC message. With a 16x8 grid (128 LEDs), this meant up to 128 individual OSC messages per refresh cycle.
+This enhancement addresses the performance bottleneck in the original oscgard implementation where each LED required a separate OSC message. With a 16x8 grid (128 LEDs), this meant up to 128 individual OSC messages per refresh cycle.
 
 ## Solution
 
@@ -10,7 +10,7 @@ The new bulk update system sends the entire grid state in a single OSC message, 
 
 ## Implementation Details
 
-### Server Side (norns/togagrid.lua)
+### Server Side (norns/oscgard.lua)
 
 #### New Features Added:
 
@@ -21,25 +21,25 @@ The new bulk update system sends the entire grid state in a single OSC message, 
    ```
 
 2. **New OSC Message Formats:**
-   - `/togagrid_bulk`: Array of 128 hex values (8 rows × 16 cols)
-   - `/togagrid_compact`: Single hex string of 128 characters
-   - Backwards compatible with `/togagrid/N` for individual LEDs
+   - `/oscgard_bulk`: Array of 128 hex values (8 rows × 16 cols)
+   - `/oscgard_compact`: Single hex string of 128 characters
+   - Backwards compatible with `/oscgard/N` for individual LEDs
 
 3. **New Functions:**
    ```lua
-   togagrid:send_bulk_grid_state(target_dest)    -- Send array format
-   togagrid:send_compact_grid_state(target_dest) -- Send string format  
-   togagrid:set_bulk_mode(enabled)               -- Toggle bulk mode
-   togagrid:get_mode_info()                      -- Get current mode stats
+   oscgard:send_bulk_grid_state(target_dest)    -- Send array format
+   oscgard:send_compact_grid_state(target_dest) -- Send string format  
+   oscgard:set_bulk_mode(enabled)               -- Toggle bulk mode
+   oscgard:get_mode_info()                      -- Get current mode stats
    ```
 
 ### Client Side (TouchOSC)
 
 The `touchosc_bulk_processor.lua` script handles bulk updates efficiently:
 
-- Processes `/togagrid_bulk` messages with hex value arrays
-- Processes `/togagrid_compact` messages with hex strings  
-- Falls back to individual `/togagrid/N` messages for compatibility
+- Processes `/oscgard_bulk` messages with hex value arrays
+- Processes `/oscgard_compact` messages with hex strings  
+- Falls back to individual `/oscgard/N` messages for compatibility
 - Updates all 128 LEDs in a single operation
 
 ## Performance Improvements
@@ -68,7 +68,7 @@ Update latency: Low (single atomic operation)
 
 ## Data Format Specifications
 
-### Array Format (`/togagrid_bulk`)
+### Array Format (`/oscgard_bulk`)
 ```lua
 -- Message contains array of 128 hex strings
 -- Order: Row-by-row, 8 rows of 16 values each
@@ -76,7 +76,7 @@ Update latency: Low (single atomic operation)
 -- Each value: "0"-"F" representing brightness levels 0-15
 ```
 
-### Compact Format (`/togagrid_compact`)  
+### Compact Format (`/oscgard_compact`)  
 ```lua
 -- Message contains single hex string
 -- Example: "0F8C7A2E..." (128 characters total)
@@ -84,7 +84,7 @@ Update latency: Low (single atomic operation)
 -- More bandwidth efficient than array format
 ```
 
-### Individual Format (`/togagrid/N`) - Fallback
+### Individual Format (`/oscgard/N`) - Fallback
 ```lua
 -- Traditional format for backwards compatibility
 -- N: LED index 1-128
@@ -95,7 +95,7 @@ Update latency: Low (single atomic operation)
 
 ### Enable/Disable Bulk Mode
 ```lua
-local grid = include "toga/lib/togagrid"
+local grid = include "oscgard/lib/oscgard"
 
 -- Enable bulk updates (default)
 grid:set_bulk_mode(true)
@@ -117,15 +117,15 @@ print("Message reduction factor:", info.message_reduction)
 
 ## Migration Guide
 
-### For Existing toga Users:
+### For Existing oscgard Users:
 - **No changes required** - bulk mode is enabled by default
 - Existing TouchOSC controllers will continue working via fallback mode
 - To benefit from performance improvements, update TouchOSC with the new Lua script
 
 ### For TouchOSC Developers:
-- Implement `oscReceived()` handler for `/togagrid_bulk` messages
+- Implement `oscReceived()` handler for `/oscgard_bulk` messages
 - Process hex arrays or strings to update all LEDs atomically
-- Maintain fallback support for `/togagrid/N` messages
+- Maintain fallback support for `/oscgard/N` messages
 
 ## Troubleshooting
 

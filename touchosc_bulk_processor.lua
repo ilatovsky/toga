@@ -1,16 +1,16 @@
 --[[
-TouchOSC Lua Script for Toga Pure Packed Bitwise Implementation
+TouchOSC Lua Script for Oscgard Pure Packed Bitwise Implementation
 Place this script in your TouchOSC controller to handle optimized bulk grid updates
 
-This script processes toga's pure packed bitwise format:
-- Receives /togagrid_bulk with array of 128 hex values (16x8 grid)
-- Receives /togagrid_compact with single packed hex string
+This script processes oscgard's pure packed bitwise format:
+- Receives /oscgard_bulk with array of 128 hex values (16x8 grid)
+- Receives /oscgard_compact with single packed hex string
 - Ultra-efficient single-message updates (99.2% network reduction)
 - No backward compatibility - pure performance focus
 
 Usage:
 1. Add this script to your TouchOSC project
-2. Make sure your grid buttons have addresses "/togagrid/1" through "/togagrid/128"
+2. Make sure your grid buttons have addresses "/oscgard/1" through "/oscgard/128"
 3. Enjoy 100x faster grid updates with mathematical precision!
 
 Note: This script uses TouchOSC API functions (osc, system, self) that are only
@@ -21,7 +21,7 @@ available when running inside the TouchOSC environment.
 local GRID_COLS = 16
 local GRID_ROWS = 8
 local TOTAL_LEDS = GRID_COLS * GRID_ROWS
-local grid = self:findByName('togagrid')
+local grid = self:findByName('oscgard')
 
 -- Lua 5.1 compatible bitwise operations (fixed for accuracy)
 local function bit_or(a, b)
@@ -139,12 +139,12 @@ end
 function onReceiveOSC(message)
 	local address = message[1]
 	local args = message[2]
-	if address == "/togagrid_bulk" then
+	if address == "/oscgard_bulk" then
 		-- Handle bulk grid state update (pure packed format)
 		handle_bulk_update(args[1].value)
 		bulk_updates_received = bulk_updates_received + 1
 		total_leds_updated = total_leds_updated + TOTAL_LEDS
-	elseif address == "/toga_connection" then
+	elseif address == "/oscgard_connection" then
 		-- Handle connection status
 		handle_connection_status(args[1])
 	end
@@ -239,10 +239,10 @@ end
 -- Handle connection status updates
 function handle_connection_status(connected)
 	-- local status = (connected == 1.0)
-	-- print("Toga connection status:", status and "Connected" or "Disconnected")
+	-- print("Oscgard connection status:", status and "Connected" or "Disconnected")
 
 	-- -- Update connection indicator if you have one (can use name or address)
-	-- local connection_button = self:findByName("toga_connection") or self:findByAddress("/toga_connection")
+	-- local connection_button = self:findByName("oscgard_connection") or self:findByAddress("/oscgard_connection")
 	-- if connection_button then
 	handle_bulk_update(string.rep('0', 128))
 	-- connection_button.values.x = connected
@@ -253,7 +253,7 @@ end
 -- -- Grid button press handler
 -- function grid_button_pressed(button_index, pressed)
 --  -- Send button press to norns
---  local osc_address = "/togagrid/" .. button_index
+--  local osc_address = "/oscgard/" .. button_index
 --  local osc_value = pressed and 1.0 or 0.0
 
 --  -- Send to all configured norns destinations
@@ -326,9 +326,9 @@ end
 --[[
 Pure Packed Bitwise Integration with Server-Side Grid Rotation:
 
-1. Button Structure: Make sure your TouchOSC grid buttons have OSC addresses "/togagrid/1" through "/togagrid/128"
+1. Button Structure: Make sure your TouchOSC grid buttons have OSC addresses "/oscgard/1" through "/oscgard/128"
 
-2. Connection Button: Create a button named "toga_connection" for connection status display
+2. Connection Button: Create a button named "oscgard_connection" for connection status display
 
 3. Grid Rotation: Server-side rotation support
    - Rotation values: 0=0°, 1=90°, 2=180°, 3=270°
@@ -336,13 +336,13 @@ Pure Packed Bitwise Integration with Server-Side Grid Rotation:
    - Grid data is sent pre-rotated - no client-side transformation needed
    - TouchOSC displays rotated data directly
 
-4. Mathematical Precision: Toga now uses pure packed bitwise storage (16 words = 64 bytes)
+4. Mathematical Precision: Oscgard now uses pure packed bitwise storage (16 words = 64 bytes)
    with mathematical LED indexing for ultimate performance
 
 5. Network Optimization: 99.2% message reduction (128→1 per refresh) with atomic grid updates
 
 6. Pure Implementation: No backward compatibility - this script works exclusively with
-   toga's optimized packed bitwise format for maximum performance
+   oscgard's optimized packed bitwise format for maximum performance
 
 7. Performance Benefits:
    - Memory: 64 bytes total (vs 1024 bytes)
@@ -353,5 +353,5 @@ Pure Packed Bitwise Integration with Server-Side Grid Rotation:
 
 8. Customization: Adjust update_led_visual function for your LED brightness representation
 
-🚀 This TouchOSC script now matches toga's pure packed bitwise optimization with efficient rotation!
+🚀 This TouchOSC script now matches oscgard's pure packed bitwise optimization with efficient rotation!
 --]]

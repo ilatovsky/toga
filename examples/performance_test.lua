@@ -1,7 +1,7 @@
--- Example script demonstrating toga bulk update performance
+-- Example script demonstrating oscgard bulk update performance
 -- This shows the difference between individual LED updates and bulk updates
 
-local grid = include "toga/lib/togagrid"
+local grid = include "oscgard/lib/oscgard"
 
 -- Performance test variables
 local test_mode = "bulk" -- "bulk" or "individual"
@@ -10,7 +10,7 @@ local start_time = 0
 local update_times = {}
 
 function init()
-	print("Toga Performance Test")
+	print("Oscgard Performance Test")
 	print("Mode: " .. test_mode)
 
 	-- Setup grid connection
@@ -112,7 +112,7 @@ function redraw()
 	screen.clear()
 	screen.level(15)
 	screen.move(10, 20)
-	screen.text("Toga Performance Test")
+	screen.text("Oscgard Performance Test")
 
 	screen.move(10, 35)
 	screen.text("Mode: " .. test_mode)

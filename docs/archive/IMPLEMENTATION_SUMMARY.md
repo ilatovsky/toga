@@ -1,10 +1,10 @@
-# Toga Grid Performance Enhancement - Implementation Summary
+# Oscgard Grid Performance Enhancement - Implementation Summary
 
 ## What Was Implemented
 
 ### 🚀 Core Performance Enhancement + Mathematical Optimization
 
-**Problem Solved**: The original toga implementation had two major performance bottlenecks:
+**Problem Solved**: The original oscgard implementation had two major performance bottlenecks:
 1. **Network**: 128 individual OSC messages per grid refresh
 2. **Memory/CPU**: Inefficient 2D arrays + boolean dirty flags
 
@@ -23,21 +23,21 @@
 
 ## Files Modified/Created
 
-### 1. **Core Library Enhancement** (`lib/togagrid.lua`)
+### 1. **Core Library Enhancement** (`lib/oscgard.lua`)
 - **Flat hex array implementation** with mathematical indexing
 - **Binary dirty flags** using bitwise operations (128 flags in 4 integers)
 - **Zero-copy bulk serialization** - no data conversion needed
 - New OSC message formats:
-  - `/togagrid_bulk`: Array of 128 hex values 
-  - `/togagrid_compact`: Single hex string (128 chars)
-- Automatic fallback to individual `/togagrid/N` messages for compatibility
+  - `/oscgard_bulk`: Array of 128 hex values 
+  - `/oscgard_compact`: Single hex string (128 chars)
+- Automatic fallback to individual `/oscgard/N` messages for compatibility
 - **Mathematical utility functions**:
   ```lua
   grid_to_index(x, y, cols)          -- 2D to flat conversion
   set_dirty_bit(array, index)        -- Binary flag operations  
   send_bulk_grid_state()             -- Zero-copy serialization
-  togagrid:set_bulk_mode(enabled)    -- Mode switching
-  togagrid:get_mode_info()           -- Performance statistics
+  oscgard:set_bulk_mode(enabled)    -- Mode switching
+  oscgard:get_mode_info()           -- Performance statistics
   ```
 
 ### 2. **TouchOSC Client Script** (`touchosc_bulk_processor.lua`)
@@ -54,7 +54,7 @@
 
 ### 4. **Performance Testing Tools**
 - **`examples/performance_test.lua`**: Animation-based performance comparison  
-- **`examples/toga_perf_test.lua`**: Automated test suite showing improvements
+- **`examples/oscgard_perf_test.lua`**: Automated test suite showing improvements
 - **`examples/flat_array_benchmark.lua`**: Mathematical optimization benchmarks
 - **`FLAT_ARRAY_OPTIMIZATION.md`**: Technical deep-dive on mathematical benefits
 
@@ -102,7 +102,7 @@ end
 
 ### For Norns Script Developers
 ```lua
-local grid = include "toga/lib/togagrid"
+local grid = include "oscgard/lib/oscgard"
 grid = grid:connect()
 
 -- Bulk mode is enabled by default - no changes needed!
@@ -145,8 +145,8 @@ This implementation provides a foundation for:
 
 ## Migration Path
 
-✅ **Immediate**: All existing toga installations benefit automatically
+✅ **Immediate**: All existing oscgard installations benefit automatically
 ✅ **Enhanced**: Update TouchOSC controllers for full performance gains  
 ✅ **Zero breaking changes**: Complete backwards compatibility maintained
 
-This enhancement transforms toga from a functional but network-heavy controller into a high-performance, WiFi-optimized grid interface that rivals wired connections in responsiveness!
+This enhancement transforms oscgard from a functional but network-heavy controller into a high-performance, WiFi-optimized grid interface that rivals wired connections in responsiveness!

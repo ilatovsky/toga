@@ -1,8 +1,8 @@
--- Toga Performance Test & Migration Helper
+-- Oscgard Performance Test & Migration Helper
 -- Run this script to see the performance difference between modes
--- Place in: ~/dust/code/toga_perf_test/toga_perf_test.lua
+-- Place in: ~/dust/code/oscgard_perf_test/oscgard_perf_test.lua
 
-local grid_lib = include "toga/lib/togagrid"
+local grid_lib = include "oscgard/lib/oscgard"
 local grid
 
 -- Test parameters
@@ -24,7 +24,7 @@ local test_running = false
 local animation_time = 0
 
 function init()
-	print("=== Toga Performance Tester ===")
+	print("=== Oscgard Performance Tester ===")
 	print("This will demonstrate the performance difference")
 	print("between bulk and individual LED update modes.")
 	print("")
@@ -230,7 +230,7 @@ function redraw()
 
 	screen.level(15)
 	screen.move(5, 15)
-	screen.text("Toga Performance Test")
+	screen.text("Oscgard Performance Test")
 
 	if test_running then
 		screen.move(5, 30)

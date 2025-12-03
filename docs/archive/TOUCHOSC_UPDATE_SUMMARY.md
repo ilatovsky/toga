@@ -13,8 +13,8 @@
 - Added `total_leds_updated` for comprehensive stats
 
 ### **3. OSC Handler Simplification**
-- Removed individual LED update fallback (`/togagrid/N` messages)
-- Focused only on bulk updates (`/togagrid_bulk` and `/togagrid_compact`)
+- Removed individual LED update fallback (`/oscgard/N` messages)
+- Focused only on bulk updates (`/oscgard_bulk` and `/oscgard_compact`)
 - Aligned with toga's pure implementation approach
 
 ### **4. Mathematical Precision**

@@ -3,21 +3,21 @@
 ## ❌ **Problem:**
 TouchOSC was receiving 128 separate STRING arguments instead of a proper array:
 ```
-RECEIVE | ADDRESS(/togagrid_bulk) STRING(0) STRING(0) STRING(0) ... (128 times)
+RECEIVE | ADDRESS(/oscgard_bulk) STRING(0) STRING(0) STRING(0) ... (128 times)
 ```
 
-This happened because `osc.send(dest, "/togagrid_bulk", grid_data)` was unpacking the table as individual arguments.
+This happened because `osc.send(dest, "/oscgard_bulk", grid_data)` was unpacking the table as individual arguments.
 
 ## ✅ **Solution Applied:**
 
-### **1. Server-Side Fix (togagrid.lua):**
+### **1. Server-Side Fix (oscgard.lua):**
 ```lua
 -- Before (sending as 128 separate arguments):
-osc.send(dest, "/togagrid_bulk", grid_data)
+osc.send(dest, "/oscgard_bulk", grid_data)
 
 -- After (sending as single string):
 local hex_string = table.concat(grid_data)
-osc.send(dest, "/togagrid_bulk", { hex_string })
+osc.send(dest, "/oscgard_bulk", { hex_string })
 ```
 
 ### **2. Fixed Compact Function Bug:**
@@ -47,7 +47,7 @@ function handle_bulk_update(args)
 
 ### **Now TouchOSC Will Receive:**
 ```
-RECEIVE | ADDRESS(/togagrid_bulk) STRING(000000000000000000005000000000000000000050000000000000000000550000000000000000000000000000000005000F005000000000000000000005000000000000000000000000)
+RECEIVE | ADDRESS(/oscgard_bulk) STRING(000000000000000000005000000000000000000050000000000000000000550000000000000000000000000000000005000F005000000000000000000005000000000000000000000000)
 ```
 
 **Single string with 128 hex characters representing all LED states!**

@@ -1,11 +1,11 @@
-# Togagrid Flow Diagram
+# Oscgardgrid Flow Diagram
 
-This diagram describes the flow and architecture of the `togagrid.lua` script, which creates a virtual grid controller that bridges between a physical grid device and OSC-based TouchOSC clients.
+This diagram describes the flow and architecture of the `oscgard.lua` script, which creates a virtual grid controller that bridges between a physical grid device and OSC-based TouchOSC clients.
 
 ```mermaid
 graph TD
-    A[Script Start] --> B["togagrid:connect()"]
-    B --> C["togagrid:init()"]
+    A[Script Start] --> B["oscgard:connect()"]
+    B --> C["oscgard:init()"]
     
     C --> D[Initialize Buffers]
     C --> E[Hook OSC Input]
@@ -18,10 +18,10 @@ graph TD
     D --> D3[dirty flags: 16x8]
     
     E --> E1[Save original osc.event]
-    E1 --> E2[Replace with togagrid.osc_in]
+    E1 --> E2[Replace with oscgard.osc_in]
     
     F --> F1[Save original grid.cleanup]
-    F1 --> F2[Replace with togagrid.cleanup]
+    F1 --> F2[Replace with oscgard.cleanup]
     
     G --> G1[Start Clock Coroutine]
     G1 --> G2[Background Sync Loop]
@@ -33,8 +33,8 @@ graph TD
         I[OSC Message Received]
         I --> J{Path Type?}
         
-        J -->|"/toga_connection"| K[New Client Connection]
-        J -->|"/togagrid/N"| L[Grid Button Press]
+        J -->|"/oscgard_connection"| K[New Client Connection]
+        J -->|"/oscgard/N"| L[Grid Button Press]
         J -->|Other| M[Pass to Original Handler]
         
         K --> K1[Add to Destination List]
@@ -74,7 +74,7 @@ graph TD
     end
     
     subgraph "Cleanup Process"
-        FF[Script Shutdown] --> GG["togagrid.cleanup()"]
+        FF[Script Shutdown] --> GG["oscgard.cleanup()"]
         GG --> HH[Cancel Background Sync]
         HH --> II[Clear All LEDs]
         II --> JJ[Send Disconnection Signal]
@@ -119,10 +119,10 @@ graph TD
 - **dirty flags**: Track which LEDs need updates
 
 ### 3. **OSC Communication**
-- Listens for `/toga_connection` messages from new TouchOSC clients
-- Processes `/togagrid/N` button press messages
-- Sends LED updates as `/togagrid/N` with brightness values (0.0-1.0)
-- Sends connection status via `/toga_connection`
+- Listens for `/oscgard_connection` messages from new TouchOSC clients
+- Processes `/oscgard/N` button press messages
+- Sends LED updates as `/oscgard/N` with brightness values (0.0-1.0)
+- Sends connection status via `/oscgard_connection`
 
 ### 4. **Background Sync**
 - Runs every 250ms in a separate coroutine

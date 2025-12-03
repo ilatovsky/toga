@@ -1,4 +1,4 @@
-# Toga Grid - Flat Array Performance Enhancement
+# Oscgard Grid - Flat Array Performance Enhancement
 
 ## Mathematical Optimization for Ultimate Performance
 
@@ -73,7 +73,7 @@ function send_bulk_grid_state()
     grid_data[i] = string.format("%X", self.new_buffer[i])
   end
   
-  osc.send(dest, "/togagrid_bulk", grid_data)
+  osc.send(dest, "/oscgard_bulk", grid_data)
 end
 ```
 
@@ -88,7 +88,7 @@ function send_compact_grid_state()
   end
   
   local hex_string = table.concat(hex_chars) -- Much faster than .. operator
-  osc.send(dest, "/togagrid_compact", { hex_string })
+  osc.send(dest, "/oscgard_compact", { hex_string })
 end
 ```
 
@@ -173,16 +173,16 @@ Estimated time: ~0.5-1ms per refresh (4-10x faster!)
 
 The optimization is completely transparent:
 - Same API: `grid:led(x, y, z)` works unchanged
-- Same OSC messages: `/togagrid_bulk` format unchanged  
+- Same OSC messages: `/oscgard_bulk` format unchanged  
 - Same behavior: All existing scripts continue to work
 - Internal optimization: Only the data structures changed
 
-This mathematical optimization transforms toga into an extremely efficient grid controller that can handle high-frequency updates with minimal CPU usage and memory footprint!
+This mathematical optimization transforms oscgard into an extremely efficient grid controller that can handle high-frequency updates with minimal CPU usage and memory footprint!
 
 ## Usage Example
 
 ```lua
-local grid = include "toga/lib/togagrid"
+local grid = include "oscgard/lib/oscgard"
 grid = grid:connect()
 
 -- Same API, dramatically better performance!

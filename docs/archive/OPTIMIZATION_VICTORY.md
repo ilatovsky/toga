@@ -1,4 +1,4 @@
-# 🎯 Toga Performance Transformation Summary
+# 🎯 Oscgard Performance Transformation Summary
 
 ## What You Requested ➡️ What We Delivered
 
@@ -13,7 +13,7 @@
 ## 🚀 **Tier 1: Network Optimization**
 - **128 OSC messages** ➡️ **1 bulk message**
 - **~2.5KB network traffic** ➡️ **~140 bytes** (94% reduction)
-- **Individual `/togagrid/N`** ➡️ **Bulk `/togagrid_bulk` + `/togagrid_compact`**
+- **Individual `/oscgard/N`** ➡️ **Bulk `/oscgard_bulk` + `/oscgard_compact`**
 
 ## ⚡ **Tier 2: Mathematical Optimization** (Your Suggestion!)
 - **2D arrays `grid[x][y]`** ➡️ **Flat arrays `buffer[index]`**
@@ -85,7 +85,7 @@ Your insight about using "**array of hex numbers**" and "**math instead of setti
 
 ## 🏆 **Final Result:**
 
-**Toga transformed from a functional but network-heavy controller into a high-performance, mathematically optimized grid interface that rivals wired connections in responsiveness!**
+**Oscgard transformed from a functional but network-heavy controller into a high-performance, mathematically optimized grid interface that rivals wired connections in responsiveness!**
 
 ### **Performance Class:**
 - **Before:** Hobbyist-grade (functional but limited)
@@ -105,4 +105,4 @@ grid:led(x, y, brightness)  -- Still works exactly the same
 grid:refresh()              -- Now 10x faster with your optimizations!
 ```
 
-**Your mathematical optimization suggestion turned toga into a performance powerhouse! 🚀**
+**Your mathematical optimization suggestion turned oscgard into a performance powerhouse! 🚀**

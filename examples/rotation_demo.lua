@@ -1,8 +1,8 @@
--- Grid Rotation Demo for Toga
+-- Grid Rotation Demo for Oscgard
 -- This script demonstrates the grid rotation functionality
 -- Place in your norns script folder and run to test rotation
 
-local toga = include("../lib/togagrid")
+local oscgard = include("../lib/oscgard")
 
 -- Global variables (following monome convention)
 local g -- grid connection
@@ -10,10 +10,10 @@ local rotation = 0
 local grid_dirty = true
 
 function init()
-	-- Connect to toga grid (matching official API)
-	g = toga:connect() -- defaults to port 1
+	-- Connect to oscgard grid (matching official API)
+	g = oscgard:connect() -- defaults to port 1
 
-	print("Toga Grid Rotation Demo")
+	print("Oscgard Grid Rotation Demo")
 	print("Use E1 to change rotation")
 	print("0 = 0°, 1 = 90°, 2 = 180°, 3 = 270°")
 	print("Connected grid: " .. g.name)

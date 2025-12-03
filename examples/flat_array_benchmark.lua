@@ -1,8 +1,8 @@
--- Toga Flat Array Performance Benchmark
+-- Oscgard Flat Array Performance Benchmark
 -- Demonstrates the performance improvement from flat arrays + binary flags
 -- Run this to see mathematical optimization benefits
 
-local grid_lib = include "toga/lib/togagrid"
+local grid_lib = include "oscgard/lib/oscgard"
 
 -- Benchmark parameters
 local BENCHMARK_ITERATIONS = 1000
@@ -19,7 +19,7 @@ local benchmark_results = {
 local grid
 
 function init()
-	print("=== Toga Flat Array Performance Benchmark ===")
+	print("=== Oscgard Flat Array Performance Benchmark ===")
 	print("Testing mathematical optimization benefits:")
 	print("- Flat hex arrays vs 2D arrays")
 	print("- Binary dirty flags vs boolean arrays")
@@ -192,7 +192,7 @@ function redraw()
 
 	screen.level(15)
 	screen.move(5, 15)
-	screen.text("Toga Flat Array Benchmark")
+	screen.text("Oscgard Flat Array Benchmark")
 
 	if benchmark_results.completed then
 		screen.move(5, 35)

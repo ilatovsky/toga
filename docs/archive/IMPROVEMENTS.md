@@ -1,11 +1,11 @@
 # toga-improved Performance Optimizations
 
-This is an optimized version of the toga library with significant performance improvements for norns grid emulation via TouchOSC.
+This is an optimized version of the oscgard library with significant performance improvements for norns grid emulation via TouchOSC.
 
 ## Changes Made
 
 ### 1. **30Hz Refresh Rate Throttling**
-- Added `last_refresh_time` and `refresh_interval` (33ms) to the togagrid object
+- Added `last_refresh_time` and `refresh_interval` (33ms) to the oscgard object
 - `refresh()` now checks if enough time has passed since the last refresh
 - Prevents excessive OSC message bursts when scripts call `g:refresh()` in tight loops
 - Force refresh still available for initial connection scenarios
@@ -53,13 +53,13 @@ This is an optimized version of the toga library with significant performance im
 
 ## Usage
 
-Simply replace the toga library include with:
+Simply replace the oscgard library include with:
 ```lua
-local g = include("toga-improved/lib/togagrid"):connect()
+local g = include("oscgard-improved/lib/oscgard"):connect()
 ```
 
 All existing scripts should work without modification!
 
 ## Compatibility
 
-Fully backward compatible with the original toga library API.
+Fully backward compatible with the original oscgard library API.

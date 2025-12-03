@@ -1,9 +1,9 @@
--- togagrid_class.lua
+-- oscgard_class.lua
 -- Virtual grid class for creating multiple independent grid instances
 -- Used by mod.lua to create per-client grids
 
-local TogaGrid = {}
-TogaGrid.__index = TogaGrid
+local OscgardGrid = {}
+OscgardGrid.__index = OscgardGrid
 
 -- Packed state configuration (shared)
 local LEDS_PER_WORD = 8 -- 8 LEDs per 32-bit number (4 bits each)
@@ -110,11 +110,11 @@ local function has_dirty_bits(dirty_array)
 end
 
 ------------------------------------------
--- TogaGrid class
+-- OscgardGrid class
 ------------------------------------------
 
-function TogaGrid.new(id, client)
-	local self = setmetatable({}, TogaGrid)
+function OscgardGrid.new(id, client)
+	local self = setmetatable({}, OscgardGrid)
 
 	-- Grid properties (monome API compatible)
 	self.id = id
@@ -122,7 +122,7 @@ function TogaGrid.new(id, client)
 	self.rows = 8
 	self.port = nil -- assigned by mod
 	self.name = client[1] .. ":" .. client[2]
-	self.serial = "toga-" .. client[1] .. ":" .. client[2]
+	self.serial = "oscgard-" .. client[1] .. ":" .. client[2]
 
 	-- Client connection
 	self.client = client
@@ -145,7 +145,7 @@ function TogaGrid.new(id, client)
 	return self
 end
 
-function TogaGrid:led(x, y, z)
+function OscgardGrid:led(x, y, z)
 	-- Get logical dimensions based on rotation
 	-- Rotation 0, 2: logical is 16x8 (same as physical)
 	-- Rotation 1, 3: logical is 8x16 (swapped)
@@ -178,7 +178,7 @@ function TogaGrid:led(x, y, z)
 	end
 end
 
-function TogaGrid:all(z)
+function OscgardGrid:all(z)
 	local total_leds = self.cols * self.rows
 	local brightness = math.max(0, math.min(15, z))
 	for i = 1, total_leds do
@@ -187,7 +187,7 @@ function TogaGrid:all(z)
 	end
 end
 
-function TogaGrid:refresh()
+function OscgardGrid:refresh()
 	local now = util.time()
 	if (now - self.last_refresh_time) < self.refresh_interval then
 		return
@@ -203,7 +203,7 @@ function TogaGrid:refresh()
 	end
 end
 
-function TogaGrid:force_refresh()
+function OscgardGrid:force_refresh()
 	for i = 1, #self.dirty do
 		self.dirty[i] = 0xFFFFFFFF
 	end
@@ -214,21 +214,21 @@ function TogaGrid:force_refresh()
 	clear_all_dirty_bits(self.dirty)
 end
 
-function TogaGrid:intensity(i)
+function OscgardGrid:intensity(i)
 	-- TouchOSC doesn't support hardware intensity
 end
 
-function TogaGrid:rotation(val)
+function OscgardGrid:rotation(val)
 	if val >= 0 and val <= 3 then
 		self.rotation_state = val
-		print("toga: rotation set to " .. (val * 90) .. " degrees")
+		print("oscgard: rotation set to " .. (val * 90) .. " degrees")
 		self:force_refresh()
 	end
 end
 
 -- Transform physical key coordinates (from TouchOSC) to logical coordinates
 -- This is the inverse of transform_coordinates
-function TogaGrid:transform_key(px, py)
+function OscgardGrid:transform_key(px, py)
 	local cols, rows = self.cols, self.rows -- 16, 8
 
 	if self.rotation_state == 0 then
@@ -248,7 +248,7 @@ function TogaGrid:transform_key(px, py)
 	return px, py
 end
 
-function TogaGrid:send_bulk_grid_state()
+function OscgardGrid:send_bulk_grid_state()
 	local grid_data = {}
 	local total_leds = self.cols * self.rows
 
@@ -258,17 +258,17 @@ function TogaGrid:send_bulk_grid_state()
 	end
 
 	local hex_string = table.concat(grid_data)
-	osc.send(self.client, "/togagrid_bulk", { hex_string })
+	osc.send(self.client, "/oscgard_bulk", { hex_string })
 end
 
-function TogaGrid:send_connected(connected)
-	osc.send(self.client, "/toga_connection", { connected and 1.0 or 0.0 })
+function OscgardGrid:send_connected(connected)
+	osc.send(self.client, "/oscgard_connection", { connected and 1.0 or 0.0 })
 end
 
-function TogaGrid:cleanup()
+function OscgardGrid:cleanup()
 	self:all(0)
 	self:force_refresh()
 	self:send_connected(false)
 end
 
-return TogaGrid
+return OscgardGrid

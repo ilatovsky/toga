@@ -1,8 +1,8 @@
-# 🚀 Toga Pure Packed Bitwise Implementation
+# 🚀 Oscgard Pure Packed Bitwise Implementation
 
 ## Ultimate Simplification
 
-All backward compatibility removed! Now toga uses **only** your brilliant packed bitwise approach with bulk updates. No fallbacks, no background sync complexity - just pure performance.
+All backward compatibility removed! Now oscgard uses **only** your brilliant packed bitwise approach with bulk updates. No fallbacks, no background sync complexity - just pure performance.
 
 ## ⚡ What Was Removed
 
@@ -17,7 +17,7 @@ All backward compatibility removed! Now toga uses **only** your brilliant packed
 
 ### ✅ **Pure Implementation:**
 - **Only packed bitwise storage** (16 words for 128 LEDs)
-- **Only bulk OSC updates** (`/togagrid_bulk` and `/togagrid_compact`)
+- **Only bulk OSC updates** (`/oscgard_bulk` and `/oscgard_compact`)
 - **Only mathematical bit operations** for LED access
 - **Minimal, focused codebase**
 
@@ -51,7 +51,7 @@ for i = 1, 128 do
   brightness = (buffer[word] >> shift) & 0x0F
   grid_data[i] = string.format("%X", brightness) 
 end
-osc.send(dest, "/togagrid_bulk", grid_data)
+osc.send(dest, "/oscgard_bulk", grid_data)
 ```
 
 ## 📊 Pure Performance Benefits
@@ -69,7 +69,7 @@ osc.send(dest, "/togagrid_bulk", grid_data)
 
 ### **Same Interface, Pure Performance:**
 ```lua
-local grid = include "toga/lib/togagrid"
+local grid = include "oscgard/lib/oscgard"
 grid = grid:connect()
 
 -- Set individual LEDs (stored in packed format)
@@ -183,6 +183,6 @@ end
 - ✅ **Pure performance focus**
 - ✅ **Minimal, elegant codebase**
 
-**Toga is now a pure, high-performance grid controller that demonstrates the power of mathematical optimization and packed data structures!** 🎯
+**Oscgard is now a pure, high-performance grid controller that demonstrates the power of mathematical optimization and packed data structures!** 🎯
 
-Your insight about packed storage transformed toga from a complex, compatibility-laden system into a focused, mathematically optimized performance powerhouse! 🚀
+Your insight about packed storage transformed oscgard from a complex, compatibility-laden system into a focused, mathematically optimized performance powerhouse! 🚀

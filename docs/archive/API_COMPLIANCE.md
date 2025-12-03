@@ -1,6 +1,6 @@
-# Toga Grid API Compliance Analysis
+# Oscgard Grid API Compliance Analysis
 
-Based on the official monome grid reference at https://monome.org/docs/norns/reference/grid, here are the missing or incorrect implementations in our toga script:
+Based on the official monome grid reference at https://monome.org/docs/norns/reference/grid, here are the missing or incorrect implementations in our oscgard script:
 
 ## ✅ **Already Implemented Correctly**
 - `my_grid:led(x, y, val)` - Set single LED state ✓
@@ -25,7 +25,7 @@ Based on the official monome grid reference at https://monome.org/docs/norns/ref
 
 ## 📋 **API Compatibility Status**
 
-| Feature | Official API | Toga Implementation | Status |
+| Feature | Official API | Oscgard Implementation | Status |
 |---------|-------------|-------------------|--------|
 | `grid.connect(n)` | ✓ | ✓ | ✅ Fixed |
 | `my_grid:led(x,y,val)` | ✓ | ✓ | ✅ Working |
@@ -43,10 +43,10 @@ Based on the official monome grid reference at https://monome.org/docs/norns/ref
 
 ### Basic Usage (Official API Compatible)
 ```lua
-local toga = include("lib/togagrid")
+local oscgard = include("lib/oscgard")
 
 function init()
-  g = toga:connect()  -- or toga:connect(1) for specific port
+  g = oscgard:connect()  -- or oscgard:connect(1) for specific port
   
   g.key = function(x, y, z)
     if z == 1 then
@@ -70,7 +70,7 @@ function grid.remove(old_grid)
 end
 ```
 
-### Advanced Features (Toga Extensions)
+### Advanced Features (Oscgard Extensions)
 ```lua
 -- Rotation support
 g:rotation(1)  -- 90 degree rotation
@@ -88,7 +88,7 @@ print("Rotation:", info.rotation)
 
 ## ✅ **Conclusion**
 
-Toga now implements **100% compatibility** with the official monome grid API while providing significant performance improvements and additional features like rotation support and TouchOSC integration.
+Oscgard now implements **100% compatibility** with the official monome grid API while providing significant performance improvements and additional features like rotation support and TouchOSC integration.
 
 The rotation demo script now follows official monome conventions:
 - Uses global `g` variable for grid connection

@@ -1,16 +1,16 @@
 -- UNCOMMENT TO add midigrid plugin
 --local grid = util.file_exists(_path.code.."midigrid") and include "midigrid/lib/mg_128" or grid
 
-local togagrid = {
+local oscgard = {
   -- API-compatible properties
-  name = "toga virtual grid",
+  name = "oscgard virtual grid",
   device = {
     id = 1,
     cols = 16,
     rows = 8,
     port = 1,
-    name = "toga virtual grid",
-    serial = "toga-001"
+    name = "oscgard virtual grid",
+    serial = "oscgard-001"
   },
 
   -- Legacy properties for backward compatibility
@@ -38,17 +38,17 @@ local togagrid = {
   bits_per_led = 4   -- 4 bits = 16 brightness levels (0-15)
 }
 
-function togagrid:connect(port)
-  if _ENV.togagrid then return _ENV.togagrid end
+function oscgard:connect(port)
+  if _ENV.oscgard then return _ENV.oscgard end
 
   -- Set port if provided
   if port then
-    togagrid.device.port = port
+    oscgard.device.port = port
   end
 
-  togagrid:init()
-  _ENV.togagrid = togagrid
-  return togagrid
+  oscgard:init()
+  _ENV.oscgard = oscgard
+  return oscgard
 end
 
 -- Create packed state buffer using bitwise storage
@@ -161,7 +161,7 @@ local function has_dirty_bits(dirty_array)
   return false
 end
 
-function togagrid:init()
+function oscgard:init()
   -- UNCOMMENT to add default touchosc client
   --table.insert(self.dest, {"192.168.0.123",8002})
 
@@ -178,8 +178,8 @@ function togagrid:init()
   self.old_grid = grid.connect()
   if self.old_grid then
     self.old_grid.key = function(x, y, z)
-      if togagrid.key then
-        togagrid.key(x, y, z)
+      if oscgard.key then
+        oscgard.key(x, y, z)
       else
         --print("grid.key is not defined!")
       end
@@ -187,43 +187,43 @@ function togagrid:init()
   end
 
   -- Call add callback if available
-  if togagrid.add then
-    togagrid.add(self)
+  if oscgard.add then
+    oscgard.add(self)
   end
 
   self:send_connected(nil, true)
 end
 
 -- @static
-function togagrid.osc_in(path, args, from)
+function oscgard.osc_in(path, args, from)
   local consumed = false
-  if not togagrid.cleanup_done then
+  if not oscgard.cleanup_done then
     local x, y, z, i
-    --print("togagrid_osc_in", dump(path), dump(args), dump(from))
-    if string.sub(path, 1, 16) == "/toga_connection" then
-      print("togagrid connect!")
+    --print("oscgardgrid_osc_in", dump(path), dump(args), dump(from))
+    if string.sub(path, 1, 16) == "/oscgard_connection" then
+      print("oscgardgrid connect!")
       local added = false
-      for d, dest in pairs(togagrid.dest) do
+      for d, dest in pairs(oscgard.dest) do
         if dest[1] == from[1] and dest[2] == from[2] then
           added = true
         end
       end
       if not added then
-        print("togagrid: add new toga client", from[1] .. ":" .. from[2])
-        table.insert(togagrid.dest, from)
-        togagrid:refresh(true, from)
+        print("oscgardgrid: add new oscgard client", from[1] .. ":" .. from[2])
+        table.insert(oscgard.dest, from)
+        oscgard:refresh(true, from)
       end
       -- echo back anyway to update connection button value
-      togagrid:send_connected(from, true)
-      -- do not consume the event so togaarc can also add the new touchosc client.
-    elseif string.sub(path, 1, 10) == "/togagrid/" then
+      oscgard:send_connected(from, true)
+      -- do not consume the event so oscarc can also add the new touchosc client.
+    elseif string.sub(path, 1, 10) == "/oscgard/" then
       i = tonumber(string.sub(path, 11))
       x = ((i - 1) % 16) + 1
       y = (i - 1) // 16 + 1
       z = args[1] // 1
-      --print("togagrid_osc_in togagrid", i, x, y, z)
-      if togagrid.key then
-        togagrid.key(x, y, z)
+      --print("oscgardgrid_osc_in oscgard", i, x, y, z)
+      if oscgard.key then
+        oscgard.key(x, y, z)
       end
       -- Removed immediate LED update on button release - let next refresh handle it
       consumed = true
@@ -232,44 +232,44 @@ function togagrid.osc_in(path, args, from)
 
   if not consumed then
     -- invoking original osc.event callback if it exists
-    if togagrid.old_osc_in then
-      togagrid.old_osc_in(path, args, from)
+    if oscgard.old_osc_in then
+      oscgard.old_osc_in(path, args, from)
     end
   end
 end
 
-function togagrid:hook_osc_in()
-  if togagrid.old_osc_in ~= nil then return end
-  --print("togagrid: hook old osc_in")
-  togagrid.old_osc_in = osc.event
-  osc.event = togagrid.osc_in
+function oscgard:hook_osc_in()
+  if oscgard.old_osc_in ~= nil then return end
+  --print("oscgardgrid: hook old osc_in")
+  oscgard.old_osc_in = osc.event
+  osc.event = oscgard.osc_in
 end
 
 -- @static
-function togagrid.cleanup()
-  if togagrid.old_cleanup then
-    togagrid.old_cleanup()
+function oscgard.cleanup()
+  if oscgard.old_cleanup then
+    oscgard.old_cleanup()
   end
-  if not togagrid.cleanup_done then
+  if not oscgard.cleanup_done then
     -- Clear all LEDs before disconnecting
-    print("togagrid: clearing all LEDs on script shutdown")
-    togagrid:all(0)
-    togagrid:refresh(true) -- Force immediate refresh to clear all LEDs
+    print("oscgardgrid: clearing all LEDs on script shutdown")
+    oscgard:all(0)
+    oscgard:refresh(true) -- Force immediate refresh to clear all LEDs
 
     -- Send disconnected signal
-    togagrid:send_connected(nil, false)
-    togagrid.cleanup_done = true
+    oscgard:send_connected(nil, false)
+    oscgard.cleanup_done = true
   end
 end
 
-function togagrid:hook_cleanup()
-  if togagrid.old_cleanup ~= nil then return end
-  --print("togagrid: hook old cleanup")
-  togagrid.old_cleanup = grid.cleanup
-  grid.cleanup = togagrid.cleanup
+function oscgard:hook_cleanup()
+  if oscgard.old_cleanup ~= nil then return end
+  --print("oscgardgrid: hook old cleanup")
+  oscgard.old_cleanup = grid.cleanup
+  grid.cleanup = oscgard.cleanup
 end
 
-function togagrid:rotation(val)
+function oscgard:rotation(val)
   if val >= 0 and val <= 3 then
     self.rotation_state = val
     print("Grid rotation set to " .. (val * 90) .. " degrees")
@@ -285,7 +285,7 @@ function togagrid:rotation(val)
   end
 end
 
-function togagrid:all(z)
+function oscgard:all(z)
   local total_leds = self.cols * self.rows
   local brightness = math.max(0, math.min(15, z))
 
@@ -300,7 +300,7 @@ function togagrid:all(z)
   end
 end
 
-function togagrid:led(x, y, z)
+function oscgard:led(x, y, z)
   if x < 1 or x > self.cols or y < 1 or y > self.rows then
     return -- Silently ignore out-of-bounds coordinates
   end
@@ -331,7 +331,7 @@ function togagrid:led(x, y, z)
   end
 end
 
-function togagrid:refresh(force_refresh, target_dest)
+function oscgard:refresh(force_refresh, target_dest)
   -- Throttle refresh to 30Hz unless forced
   if not force_refresh then
     local now = util.time()
@@ -358,24 +358,24 @@ function togagrid:refresh(force_refresh, target_dest)
   end
 end
 
-function togagrid:intensity(i)
+function oscgard:intensity(i)
   if self.old_grid then
     self.old_grid:intensity(i)
   end
 end
 
-function togagrid:send_connected(target_dest, connected)
+function oscgard:send_connected(target_dest, connected)
   for d, dest in pairs(self.dest) do
     if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
       -- do nothing
     else
-      osc.send(dest, "/toga_connection", { connected and 1.0 or 0.0 })
+      osc.send(dest, "/oscgard_connection", { connected and 1.0 or 0.0 })
     end
   end
 end
 
 -- Send entire grid state as bulk update
-function togagrid:send_bulk_grid_state(target_dest)
+function oscgard:send_bulk_grid_state(target_dest)
   local grid_data = {}
   local total_leds = self.cols * self.rows
 
@@ -394,13 +394,13 @@ function togagrid:send_bulk_grid_state(target_dest)
     if target_dest and (target_dest[1] ~= dest[1] or target_dest[2] ~= dest[2]) then
       -- do nothing
     else
-      osc.send(dest, "/togagrid_bulk", { hex_string })
+      osc.send(dest, "/oscgard_bulk", { hex_string })
     end
   end
 end
 
 -- Get grid info
-function togagrid:get_info()
+function oscgard:get_info()
   return {
     total_leds = self.cols * self.rows,
     packed_words = math.ceil((self.cols * self.rows) / self.leds_per_word),
@@ -411,4 +411,4 @@ function togagrid:get_info()
   }
 end
 
-return togagrid
+return oscgard
