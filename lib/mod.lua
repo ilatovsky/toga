@@ -16,7 +16,7 @@
 print("oscgard mod: loading...")
 
 local mod = require 'core/mods'
-local OscgardGrid = include 'oscgard_grid'
+local OscgardGrid = include 'oscgard/lib/oscgard_grid'
 
 ------------------------------------------
 -- state
