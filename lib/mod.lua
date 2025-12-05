@@ -726,7 +726,7 @@ m.redraw = function()
 			screen.move(10, y)
 			-- Show device type, slot, and client info
 			screen.text(entry.device_type ..
-				" " .. entry.slot .. ": " .. entry.device.client[1] .. ":" .. entry.device.client[2])
+				" " .. entry.slot .. ": " .. entry.device.serial)
 		end
 	end
 
