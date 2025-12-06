@@ -246,9 +246,6 @@ local function create_device(slot, client, device_type, cols, rows, serial)
 		callbacks.add(vport)
 	end
 
-	-- redraw mod menu if open
-	mod.menu.redraw()
-
 	return device
 end
 
@@ -277,9 +274,6 @@ local function remove_device(slot, device_type)
 
 	-- notify serialosc subscribers
 	notify_device_removed(device)
-
-	-- redraw mod menu if open
-	mod.menu.redraw()
 end
 
 ------------------------------------------
@@ -459,7 +453,9 @@ local function oscgard_osc_handler(path, args, from)
 			local x = args[1] + 1 -- Convert 0-indexed to 1-indexed
 			local y = args[2] + 1
 			local z = args[3]
-			device.key(x, y, z)
+			-- Transform physical coords to logical coords based on rotation
+			local lx, ly = device:transform_key(x, y)
+			device.key(lx, ly, z)
 		end
 		return
 	end
@@ -553,36 +549,6 @@ local function oscgard_osc_handler(path, args, from)
 			end
 		end
 		return
-	end
-
-	-- ========================================
-	-- OSCGARD: Button key input
-	-- ========================================
-
-	if string.sub(path, 1, 10) == "/oscgard/" then
-		local i = tonumber(string.sub(path, 11))
-		if i then
-			-- Physical coordinates from TouchOSC (grid layout)
-			local device = nil
-			local device_type, slot = find_any_client(from[1], from[2])
-			if slot then
-				device = oscgard[device_type].vports[slot].device
-			end
-
-			-- Use device dimensions or default to 16 cols
-			local cols = device and device.cols or 16
-			local px = ((i - 1) % cols) + 1
-			local py = (i - 1) // cols + 1
-			local z = args[1] // 1
-
-			if device and device.key then
-				-- Transform physical coords to logical coords based on rotation
-				local x, y = device:transform_key(px, py)
-				device.key(x, y, z)
-			end
-			-- consumed - don't pass to original handler
-			return
-		end
 	end
 
 	-- call original handler for everything else
