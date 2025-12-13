@@ -1,3 +1,11 @@
+-- Send disconnect notification to client
+function OscgardArc:send_disconnected()
+	-- /sys/disconnect s <serial> - Disconnection notification
+	if self.client and self.serial then
+		osc.send(self.client, "/sys/disconnect", { self.serial })
+	end
+end
+
 -- oscgard_arc.lua
 -- Virtual Arc class for emulating Monome Arc devices via OSC
 -- Mirrors the approach of oscgard_grid.lua
@@ -105,7 +113,7 @@ function OscgardArc:cleanup()
 			self.rings[i][j] = 0
 		end
 	end
-	-- Optionally: send disconnect or perform other cleanup
+	self:send_disconnected()
 end
 
 -- Respond to /sys/info request (stub)
