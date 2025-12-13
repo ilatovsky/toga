@@ -362,7 +362,8 @@ local function send_sys_info(client, device)
 	-- /sys/prefix s <prefix>
 	osc.send(client, "/sys/prefix", { device.prefix or oscgard.prefix })
 	-- /sys/rotation i <degrees>
-	osc.send(client, "/sys/rotation", { device.rotation_state * 90 })
+	local rotation_state = device.rotation_state or 0
+	osc.send(client, "/sys/rotation", { rotation_state * 90 })
 end
 
 ------------------------------------------
