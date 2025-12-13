@@ -21,7 +21,9 @@ end
 print("oscgard mod: loading...")
 
 local mod = require 'core/mods'
+
 local OscgardGrid = include 'oscgard/lib/oscgard_grid'
+local OscgardArc = include 'oscgard/lib/oscgard_arc'
 
 ------------------------------------------
 -- state
@@ -89,16 +91,19 @@ local function create_arc_vport()
 		delta = nil, -- arc encoder callback
 
 		led = function(self, n, x, val)
-			if self.device then self.device:led(n, x, val) end
+			if self.device and self.device.ring_set then self.device:ring_set(n, x, val) end
 		end,
-		all = function(self, val)
-			if self.device then self.device:all(val) end
+		all = function(self, n, val)
+			if self.device and self.device.ring_all then self.device:ring_all(n, val) end
 		end,
-		segment = function(self, n, from, to, val)
-			if self.device then self.device:segment(n, from, to, val) end
+		map = function(self, n, values)
+			if self.device and self.device.ring_map then self.device:ring_map(n, values) end
+		end,
+		range = function(self, n, x1, x2, val)
+			if self.device and self.device.ring_range then self.device:ring_range(n, x1, x2, val) end
 		end,
 		refresh = function(self)
-			if self.device then self.device:refresh() end
+			-- Optionally implement refresh logic
 		end,
 		encoders = 4
 	}
@@ -206,24 +211,34 @@ local function create_device(slot, client, device_type, cols, rows, serial)
 	local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
 	local callbacks = device_type == "arc" and oscgard.arc or oscgard.grid
 
-	-- create OscgardGrid instance with dimensions and serial
-	local device = OscgardGrid.new(id, client, cols, rows, serial)
-	device.port = slot
-	device.device_type = device_type
+	local device
+	if device_type == "arc" then
+		device = OscgardArc.new(id, cols)
+		device.port = slot
+		device.device_type = device_type
+		device.client = client
+		device.serial = serial or ("arc-" .. id)
+		device.name = device.serial
+		-- Optionally add more arc-specific fields
+		-- Set up delta callback
+		device.delta = function(n, d)
+			if vports[slot].delta then
+				vports[slot].delta(n, d)
+			end
+		end
+	else
+		device = OscgardGrid.new(id, client, cols, rows, serial)
+		device.port = slot
+		device.device_type = device_type
+	end
 
 	-- store in vport
 	local vport = vports[slot]
 	vport.device = device
 	vport.name = device.name
 
-	-- set up key/delta callback based on device type
-	if device_type == "arc" then
-		device.delta = function(n, d)
-			if vport.delta then
-				vport.delta(n, d)
-			end
-		end
-	else
+	-- set up key callback for grid
+	if device_type == "grid" then
 		device.key = function(x, y, z)
 			if vport.key then
 				vport.key(x, y, z)
@@ -236,7 +251,9 @@ local function create_device(slot, client, device_type, cols, rows, serial)
 		" registered on slot " .. slot .. " (id=" .. id .. ", client=" .. client[1] .. ":" .. client[2] .. ")")
 
 	-- send connection confirmation
-	device:send_connected(true)
+	if device.send_connected then
+		device:send_connected(true)
+	end
 
 	-- notify serialosc subscribers
 	notify_device_added(device)
