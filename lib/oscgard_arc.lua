@@ -91,10 +91,21 @@ function OscgardArc:ring_range(encoder, x1, x2, value)
 	end
 end
 
--- Handle encoder key event (/enc/key n s)
 function OscgardArc:handle_enc_key(encoder, state)
 	encoder = encoder + 1
 	-- TODO: store key state, trigger callback/event if needed
+end
+
+-- Cleanup method for arc device (called on device removal)
+function OscgardArc:cleanup()
+	-- Clear LED state, reset encoders, etc. if needed
+	for i = 1, self.num_encoders do
+		self.encoders[i] = 0
+		for j = 1, LEDS_PER_RING do
+			self.rings[i][j] = 0
+		end
+	end
+	-- Optionally: send disconnect or perform other cleanup
 end
 
 -- Respond to /sys/info request (stub)
