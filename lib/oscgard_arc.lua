@@ -47,6 +47,7 @@ function OscgardArc:handle_enc_delta(encoder, delta)
 	print(string.format("[arc] handle_enc_delta: encoder=%d delta=%d", encoder, delta))
 	if self.encoders[encoder] then
 		self.encoders[encoder] = self.encoders[encoder] + delta
+		self:send_enc_delta(encoder, delta)
 		-- TODO: trigger callback/event if needed
 	end
 end
@@ -58,6 +59,9 @@ function OscgardArc:ring_set(encoder, led, value)
 	led = led + 1
 	if self.rings[encoder] and self.rings[encoder][led] ~= nil then
 		self.rings[encoder][led] = value
+		if self.client then
+			osc.send(self.client, "/ring/set", { encoder - 1, led - 1, value })
+		end
 		-- TODO: mark as dirty for refresh
 	end
 end
@@ -69,6 +73,9 @@ function OscgardArc:ring_all(encoder, value)
 	if self.rings[encoder] then
 		for i = 1, LEDS_PER_RING do
 			self.rings[encoder][i] = value
+		end
+		if self.client then
+			osc.send(self.client, "/ring/all", { encoder - 1, value })
 		end
 		-- TODO: mark as dirty for refresh
 	end
@@ -82,6 +89,13 @@ function OscgardArc:ring_map(encoder, values)
 		for i = 1, LEDS_PER_RING do
 			self.rings[encoder][i] = values[i]
 		end
+		if self.client then
+			local msg = { encoder - 1 }
+			for i = 1, LEDS_PER_RING do
+				table.insert(msg, values[i])
+			end
+			osc.send(self.client, "/ring/map", msg)
+		end
 		-- TODO: mark as dirty for refresh
 	end
 end
@@ -89,7 +103,7 @@ end
 -- Set LEDs in a range (/ring/range n x1 x2 l)
 function OscgardArc:ring_range(encoder, x1, x2, value)
 	print("[arc] ring_range: encoder=" ..
-	tostring(encoder) .. " x1=" .. tostring(x1) .. " x2=" .. tostring(x2) .. " value=" .. tostring(value))
+		tostring(encoder) .. " x1=" .. tostring(x1) .. " x2=" .. tostring(x2) .. " value=" .. tostring(value))
 	encoder = encoder + 1
 	x1 = (x1 % LEDS_PER_RING) + 1
 	x2 = (x2 % LEDS_PER_RING) + 1
@@ -103,11 +117,15 @@ function OscgardArc:ring_range(encoder, x1, x2, value)
 		if i == x2 or count >= max_iter then break end
 		i = (i % LEDS_PER_RING) + 1 -- wrap around
 	until false
+	if self.client then
+		osc.send(self.client, "/ring/range", { encoder - 1, (x1 - 1) % LEDS_PER_RING, (x2 - 1) % LEDS_PER_RING, value })
+	end
 	-- TODO: mark as dirty for refresh
 end
 
 function OscgardArc:handle_enc_key(encoder, state)
 	encoder = encoder + 1
+	self:send_enc_key(encoder, state)
 	-- TODO: store key state, trigger callback/event if needed
 end
 
