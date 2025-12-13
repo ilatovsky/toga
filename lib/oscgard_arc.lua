@@ -57,10 +57,11 @@ function OscgardArc:ring_set(encoder, led, value)
 	print(string.format("[arc] ring_set: encoder=%d led=%d value=%d", encoder, led, value))
 	encoder = encoder + 1 -- OSC is 0-based, Lua is 1-based
 	led = led + 1
+	local prefix = self.prefix or (self.serial and ("/" .. self.serial) or "/arc")
 	if self.rings[encoder] and self.rings[encoder][led] ~= nil then
 		self.rings[encoder][led] = value
 		if self.client then
-			osc.send(self.client, "/ring/set", { encoder - 1, led - 1, value })
+			osc.send(self.client, prefix .. "/ring/set", { encoder - 1, led - 1, value })
 		end
 		-- TODO: mark as dirty for refresh
 	end
@@ -70,12 +71,13 @@ end
 function OscgardArc:ring_all(encoder, value)
 	print("[arc] ring_all: encoder=" .. tostring(encoder) .. " value=" .. tostring(value))
 	encoder = encoder + 1
+	local prefix = self.prefix or (self.serial and ("/" .. self.serial) or "/arc")
 	if self.rings[encoder] then
 		for i = 1, LEDS_PER_RING do
 			self.rings[encoder][i] = value
 		end
 		if self.client then
-			osc.send(self.client, "/ring/all", { encoder - 1, value })
+			osc.send(self.client, prefix .. "/ring/all", { encoder - 1, value })
 		end
 		-- TODO: mark as dirty for refresh
 	end
@@ -85,6 +87,7 @@ end
 function OscgardArc:ring_map(encoder, values)
 	print(string.format("[arc] ring_map: encoder=%d values=[%s]", encoder, table.concat(values, ",")))
 	encoder = encoder + 1
+	local prefix = self.prefix or (self.serial and ("/" .. self.serial) or "/arc")
 	if self.rings[encoder] and #values == LEDS_PER_RING then
 		for i = 1, LEDS_PER_RING do
 			self.rings[encoder][i] = values[i]
@@ -94,7 +97,7 @@ function OscgardArc:ring_map(encoder, values)
 			for i = 1, LEDS_PER_RING do
 				table.insert(msg, values[i])
 			end
-			osc.send(self.client, "/ring/map", msg)
+			osc.send(self.client, prefix .. "/ring/map", msg)
 		end
 		-- TODO: mark as dirty for refresh
 	end
@@ -103,8 +106,9 @@ end
 -- Set LEDs in a range (/ring/range n x1 x2 l)
 function OscgardArc:ring_range(encoder, x1, x2, value)
 	print("[arc] ring_range: encoder=" ..
-		tostring(encoder) .. " x1=" .. tostring(x1) .. " x2=" .. tostring(x2) .. " value=" .. tostring(value))
+	tostring(encoder) .. " x1=" .. tostring(x1) .. " x2=" .. tostring(x2) .. " value=" .. tostring(value))
 	encoder = encoder + 1
+	local prefix = self.prefix or (self.serial and ("/" .. self.serial) or "/arc")
 	x1 = (x1 % LEDS_PER_RING) + 1
 	x2 = (x2 % LEDS_PER_RING) + 1
 	if not self.rings[encoder] then return end
@@ -118,7 +122,8 @@ function OscgardArc:ring_range(encoder, x1, x2, value)
 		i = (i % LEDS_PER_RING) + 1 -- wrap around
 	until false
 	if self.client then
-		osc.send(self.client, "/ring/range", { encoder - 1, (x1 - 1) % LEDS_PER_RING, (x2 - 1) % LEDS_PER_RING, value })
+		osc.send(self.client, prefix .. "/ring/range",
+			{ encoder - 1, (x1 - 1) % LEDS_PER_RING, (x2 - 1) % LEDS_PER_RING, value })
 	end
 	-- TODO: mark as dirty for refresh
 end
