@@ -64,7 +64,7 @@ end
 
 -- Set all LEDs on ring to value (/ring/all n l)
 function OscgardArc:ring_all(encoder, value)
-	print(string.format("[arc] ring_all: encoder=%d value=%d", encoder, value))
+	print("[arc] ring_all: encoder=" .. tostring(encoder) .. " value=" .. tostring(value))
 	encoder = encoder + 1
 	if self.rings[encoder] then
 		for i = 1, LEDS_PER_RING do
