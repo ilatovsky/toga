@@ -467,9 +467,9 @@ local function oscgard_osc_handler(path, args, from)
 	-- <prefix>/grid/key x y s (0-indexed coordinates, standard monome format)
 	if path == prefix .. "/grid/key" then
 		if device and device.key and args[1] and args[2] and args[3] then
-			local x = args[1] + 1 -- Convert 0-indexed to 1-indexed
-			local y = args[2] + 1
-			local z = args[3]
+			local x = math.floor(args[1] + 1) -- Convert 0-indexed to 1-indexed
+			local y = math.floor(args[2] + 1)
+			local z = math.floor(args[3])
 			-- Transform physical coords to logical coords based on rotation
 			local lx, ly = device:transform_key(x, y)
 			device.key(lx, ly, z)
