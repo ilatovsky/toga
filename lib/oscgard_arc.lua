@@ -1,3 +1,9 @@
+-- oscgard_arc.lua
+-- Virtual Arc class for emulating Monome Arc devices via OSC
+-- Mirrors the approach of oscgard_grid.lua
+
+local OscgardArc = {}
+OscgardArc.__index = OscgardArc
 -- Send disconnect notification to client
 function OscgardArc:send_disconnected()
 	-- /sys/disconnect s <serial> - Disconnection notification
@@ -5,10 +11,6 @@ function OscgardArc:send_disconnected()
 		osc.send(self.client, "/sys/disconnect", { self.serial })
 	end
 end
-
--- oscgard_arc.lua
--- Virtual Arc class for emulating Monome Arc devices via OSC
--- Mirrors the approach of oscgard_grid.lua
 
 local OscgardArc = {}
 OscgardArc.__index = OscgardArc
