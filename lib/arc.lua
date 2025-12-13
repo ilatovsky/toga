@@ -55,13 +55,23 @@ end
 --- Create device, returns object with handler and send.
 -- @param n: (integer) vport index (1-4), defaults to 1
 -- @return vport object with led, all, refresh, etc methods
+
 function arc.connect(n)
 	n = n or 1
 	if n < 1 or n > 4 then
 		print("oscgard arc.connect: invalid port " .. n)
 		return nil
 	end
-	return oscgard.arc.vports[n]
+	local vport = oscgard.arc.vports[n]
+	-- Add segment method for compatibility with scripts like 4-big-knobs
+	if not vport.segment then
+		vport.segment = function(self, enc, from, to, val)
+			if self.device and self.device.ring_range then
+				self.device:ring_range(enc, from, to, val)
+			end
+		end
+	end
+	return vport
 end
 
 ------------------------------------------
