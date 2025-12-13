@@ -86,17 +86,19 @@ end
 -- Set LEDs in a range (/ring/range n x1 x2 l)
 function OscgardArc:ring_range(encoder, x1, x2, value)
 	encoder = encoder + 1
-	x1 = x1 + 1
-	x2 = x2 + 1
-	if self.rings[encoder] then
-		local i = x1
-		repeat
-			self.rings[encoder][i] = value
-			if i == x2 then break end
-			i = i % LEDS_PER_RING + 1 -- wrap around
-		until false
-		-- TODO: mark as dirty for refresh
-	end
+	x1 = (x1 % LEDS_PER_RING) + 1
+	x2 = (x2 % LEDS_PER_RING) + 1
+	if not self.rings[encoder] then return end
+	local i = x1
+	local count = 0
+	local max_iter = LEDS_PER_RING
+	repeat
+		self.rings[encoder][i] = value
+		count = count + 1
+		if i == x2 or count >= max_iter then break end
+		i = (i % LEDS_PER_RING) + 1 -- wrap around
+	until false
+	-- TODO: mark as dirty for refresh
 end
 
 function OscgardArc:handle_enc_key(encoder, state)
