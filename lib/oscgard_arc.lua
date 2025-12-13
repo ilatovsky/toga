@@ -2,6 +2,7 @@
 -- Virtual Arc class for emulating Monome Arc devices via OSC
 -- Mirrors the approach of oscgard_grid.lua
 
+
 local OscgardArc = {}
 OscgardArc.__index = OscgardArc
 -- Send disconnect notification to client
@@ -11,9 +12,6 @@ function OscgardArc:send_disconnected()
 		osc.send(self.client, "/sys/disconnect", { self.serial })
 	end
 end
-
-local OscgardArc = {}
-OscgardArc.__index = OscgardArc
 
 -- Arc device parameters
 local NUM_ENCODERS = 4   -- Max encoders (Arc 2 or Arc 4)
