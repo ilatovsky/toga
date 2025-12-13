@@ -746,62 +746,6 @@ end
 
 
 -- Lua 5.1 compatible bitwise operations (fixed for accuracy)
-local function bit_or(a, b)
-  local result = 0
-  local power = 1
-  while a > 0 or b > 0 do
-    local a_bit = a % 2
-    local b_bit = b % 2
-    if a_bit == 1 or b_bit == 1 then
-      result = result + power
-    end
-    a = math.floor(a / 2)
-    b = math.floor(b / 2)
-    power = power * 2
-  end
-  return result
-end
-
-local function bit_and(a, b)
-  local result = 0
-  local power = 1
-  while a > 0 and b > 0 do
-    local a_bit = a % 2
-    local b_bit = b % 2
-    if a_bit == 1 and b_bit == 1 then
-      result = result + power
-    end
-    a = math.floor(a / 2)
-    b = math.floor(b / 2)
-    power = power * 2
-  end
-  return result
-end
-
-local function bit_xor(a, b)
-  local result = 0
-  local power = 1
-  while a > 0 or b > 0 do
-    local a_bit = a % 2
-    local b_bit = b % 2
-    if a_bit ~= b_bit then
-      result = result + power
-    end
-    a = math.floor(a / 2)
-    b = math.floor(b / 2)
-    power = power * 2
-  end
-  return result
-end
-
-local function bit_lshift(value, shift)
-  return value * (2 ^ shift)
-end
-
-local function bit_rshift(value, shift)
-  return math.floor(value / (2 ^ shift))
-end
-
 
 -- Grid configuration (will be updated on /sys/connect)
 local GRID_COLS = 16
@@ -833,7 +777,7 @@ local function hex_string_to_words(hex_string)
         local hex_char = string.sub(hex_string, led_index, led_index)
         local brightness = tonumber(hex_char, 16) or 0
         local bit_shift = led_in_word * BITS_PER_LED
-        word_value = bit_or(word_value, bit_lshift(brightness, bit_shift))
+        word_value = bit32.bor(word_value, bit32.lshift(brightness, bit_shift))
         -- Debug: uncomment to see word construction
         -- if word_idx == 1 and led_in_word < 4 then
         --   print("LED " .. led_index .. ": hex=" .. hex_char .. " brightness=" .. brightness .. " shift=" .. bit_shift .. " word=" .. word_value)
@@ -848,9 +792,9 @@ end
 -- Extract LED brightness from word using bitwise operations
 local function extract_led_from_word(word, led_offset)
   local bit_shift = led_offset * BITS_PER_LED
-  local mask = bit_lshift(1, BITS_PER_LED) - 1 -- 0x0F for 4 bits
-  local shifted_value = bit_rshift(word, bit_shift)
-  local result = bit_and(shifted_value, mask)
+  local mask = bit32.lshift(1, BITS_PER_LED) - 1 -- 0x0F for 4 bits
+  local shifted_value = bit32.rshift(word, bit_shift)
+  local result = bit32.band(shifted_value, mask)
   -- Debug: temporarily enabled to help debug the extraction issue
   -- print("extract_led: word=" ..
   -- word ..
@@ -892,7 +836,7 @@ function handle_bulk_update(hex_string)
     local new_word = new_words[word_idx]
 
     -- XOR to find differences - non-zero bits indicate changes
-    local diff_word = bit_xor(old_word, new_word) -- Bitwise XOR
+    local diff_word = bit32.bxor(old_word, new_word) -- Bitwise XOR
 
     -- If any bits changed in this word, check individual LEDs
     if diff_word ~= 0 then
@@ -900,10 +844,10 @@ function handle_bulk_update(hex_string)
         local led_index = (word_idx - 1) * LEDS_PER_WORD + led_in_word + 1
         if led_index <= TOTAL_LEDS then
           local bit_shift = led_in_word * BITS_PER_LED
-          local led_mask = bit_lshift(bit_lshift(1, BITS_PER_LED) - 1, bit_shift)
+          local led_mask = bit32.lshift(bit32.lshift(1, BITS_PER_LED) - 1, bit_shift)
 
           -- Check if this specific LED changed
-          if bit_and(diff_word, led_mask) ~= 0 then
+          if bit32.band(diff_word, led_mask) ~= 0 then
             local new_brightness = extract_led_from_word(new_word, led_in_word)
 
             -- Update LED visual (rotation handled server-side)

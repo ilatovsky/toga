@@ -12,8 +12,6 @@
 --   g:refresh()
 --   g.key = function(x, y, z) ... end
 
-local mod = require 'core/mods'
-
 -- Get oscgard mod instance
 local oscgard = include('oscgard/lib/mod')
 
