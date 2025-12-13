@@ -19,7 +19,7 @@ end
 -- UI state for testing commands
 local modes = { "set", "all", "map", "range" }
 local mode = 1
-local sel_enc = 1
+local sel_enc = 0
 local sel_led = 1
 local sel_val = 15
 local range_start = 1
@@ -49,7 +49,7 @@ function redraw()
 	screen.move(10, 20)
 	screen.text("mode: " .. modes[mode])
 	screen.move(10, 30)
-	screen.text("enc: " .. sel_enc .. " led: " .. sel_led .. " val: " .. sel_val)
+	screen.text("enc: " .. (sel_enc + 1) .. " led: " .. sel_led .. " val: " .. sel_val)
 	if modes[mode] == "range" then
 		screen.move(10, 40)
 		screen.text("range: " .. range_start .. "-" .. range_end)
@@ -78,7 +78,7 @@ end
 
 function enc(n, d)
 	if n == 2 then
-		sel_enc = util.clamp(sel_enc + d, 1, 4)
+		sel_enc = util.clamp(sel_enc + d, 0, 3)
 	elseif n == 3 then
 		if modes[mode] == "range" then
 			if d > 0 then
