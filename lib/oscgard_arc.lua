@@ -88,7 +88,8 @@ end
 
 -- Set LEDs in a range (/ring/range n x1 x2 l)
 function OscgardArc:ring_range(encoder, x1, x2, value)
-	print(string.format("[arc] ring_range: encoder=%d x1=%d x2=%d value=%d", encoder, x1, x2, value))
+	print("[arc] ring_range: encoder=" ..
+	tostring(encoder) .. " x1=" .. tostring(x1) .. " x2=" .. tostring(x2) .. " value=" .. tostring(value))
 	encoder = encoder + 1
 	x1 = (x1 % LEDS_PER_RING) + 1
 	x2 = (x2 % LEDS_PER_RING) + 1
