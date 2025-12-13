@@ -44,7 +44,7 @@ end
 
 -- Handle incoming encoder delta (/enc/delta)
 function OscgardArc:handle_enc_delta(encoder, delta)
-	-- Update encoder position
+	print(string.format("[arc] handle_enc_delta: encoder=%d delta=%d", encoder, delta))
 	if self.encoders[encoder] then
 		self.encoders[encoder] = self.encoders[encoder] + delta
 		-- TODO: trigger callback/event if needed
@@ -53,6 +53,7 @@ end
 
 -- Set single LED on ring (/ring/set n x l)
 function OscgardArc:ring_set(encoder, led, value)
+	print(string.format("[arc] ring_set: encoder=%d led=%d value=%d", encoder, led, value))
 	encoder = encoder + 1 -- OSC is 0-based, Lua is 1-based
 	led = led + 1
 	if self.rings[encoder] and self.rings[encoder][led] ~= nil then
@@ -63,6 +64,7 @@ end
 
 -- Set all LEDs on ring to value (/ring/all n l)
 function OscgardArc:ring_all(encoder, value)
+	print(string.format("[arc] ring_all: encoder=%d value=%d", encoder, value))
 	encoder = encoder + 1
 	if self.rings[encoder] then
 		for i = 1, LEDS_PER_RING do
@@ -74,6 +76,7 @@ end
 
 -- Set all LEDs on ring from array (/ring/map n l[64])
 function OscgardArc:ring_map(encoder, values)
+	print(string.format("[arc] ring_map: encoder=%d values=[%s]", encoder, table.concat(values, ",")))
 	encoder = encoder + 1
 	if self.rings[encoder] and #values == LEDS_PER_RING then
 		for i = 1, LEDS_PER_RING do
@@ -85,6 +88,7 @@ end
 
 -- Set LEDs in a range (/ring/range n x1 x2 l)
 function OscgardArc:ring_range(encoder, x1, x2, value)
+	print(string.format("[arc] ring_range: encoder=%d x1=%d x2=%d value=%d", encoder, x1, x2, value))
 	encoder = encoder + 1
 	x1 = (x1 % LEDS_PER_RING) + 1
 	x2 = (x2 % LEDS_PER_RING) + 1
