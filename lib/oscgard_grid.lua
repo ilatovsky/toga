@@ -144,7 +144,8 @@ function OscgardGrid:refresh()
 	self.last_refresh_time = now
 
 	if self.buffer:has_dirty() then
-		self:send_level_full()
+		local hex_string = self.buffer:to_hex_string()
+		self:send_level_full(hex_string)
 		self.buffer:commit()
 		self.buffer:clear_dirty()
 	end
@@ -152,7 +153,8 @@ end
 
 function OscgardGrid:force_refresh()
 	self.buffer:mark_all_dirty()
-	self:send_level_full()
+	local hex_string = self.buffer:to_hex_string()
+	self:send_level_full(hex_string)
 	self.buffer:commit()
 	self.buffer:clear_dirty()
 end
@@ -191,12 +193,6 @@ function OscgardGrid:transform_key(px, py)
 	return px, py
 end
 
-function OscgardGrid:send_level_full()
-	local prefix = self.prefix or "/monome"
-	local hex_string = self.buffer:to_hex_string()
-	osc.send(self.client, prefix .. "/grid/led/level/full", { hex_string })
-end
-
 -- Serialosc-compatible: Send LED level map for an 8x8 quad
 -- Arguments: x_off, y_off (must be multiples of 8), then 64 brightness values
 function OscgardGrid:send_level_map(x_off, y_off)
@@ -224,11 +220,20 @@ function OscgardGrid:send_level_map(x_off, y_off)
 	osc.send(self.client, prefix .. "/grid/led/level/map", msg)
 end
 
+-- Unofficial perfomant osc command
+function OscgardGrid:send_level_full(hex_string)
+	local prefix = self.prefix or "/monome"
+	osc.send(self.client, prefix .. "/grid/led/level/full", { hex_string })
+end
+
 -- Serialosc-compatible: Send all quads as level maps
 function OscgardGrid:send_standard_grid_state()
-	-- For 16x8 grid, we have 2 quads (0,0) and (8,0)
-	self:send_level_map(0, 0)
-	self:send_level_map(8, 0)
+	-- Send all 8x8 quads for the grid dimensions
+	for y_off = 0, self.rows - 1, 8 do
+		for x_off = 0, self.cols - 1, 8 do
+			self:send_level_map(x_off, y_off)
+		end
+	end
 end
 
 -- Serialosc-compatible: Send single LED level
