@@ -36,6 +36,7 @@ local oscgard = {
 	-- menu state
 	menu_selected = 1,
 	menu_device_type = "grid", -- "grid" or "arc"
+	menu_metro = nil, -- metro for real-time menu updates
 
 	-- serialosc-compatible settings
 	prefix = "/oscgard", -- configurable OSC prefix (serialosc standard)
@@ -721,6 +722,13 @@ m.redraw = function()
 
 	local devices = get_all_connected_devices()
 
+	-- Clamp selection to valid range
+	if #devices > 0 then
+		oscgard.menu_selected = util.clamp(oscgard.menu_selected, 1, #devices)
+	else
+		oscgard.menu_selected = 1
+	end
+
 	if #devices == 0 then
 		screen.level(4)
 		screen.move(64, 32)
@@ -754,9 +762,25 @@ end
 
 m.init = function()
 	oscgard.menu_selected = 1
+	-- Start metro for real-time menu updates (2 Hz = every 0.5 seconds)
+	if oscgard.menu_metro then
+		oscgard.menu_metro:stop()
+	end
+	oscgard.menu_metro = metro.init()
+	oscgard.menu_metro.time = 0.5
+	oscgard.menu_metro.event = function()
+		mod.menu.redraw()
+	end
+	oscgard.menu_metro:start()
 end
 
-m.deinit = function() end
+m.deinit = function()
+	-- Stop metro when leaving menu
+	if oscgard.menu_metro then
+		oscgard.menu_metro:stop()
+		oscgard.menu_metro = nil
+	end
+end
 
 mod.menu.register(mod.this_name, m)
 
