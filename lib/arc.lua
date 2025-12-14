@@ -62,16 +62,7 @@ function arc.connect(n)
 		print("oscgard arc.connect: invalid port " .. n)
 		return nil
 	end
-	local vport = oscgard.arc.vports[n]
-	-- Add segment method for compatibility with scripts like 4-big-knobs
-	if not vport.segment then
-		vport.segment = function(self, enc, from, to, val)
-			if self.device and self.device.ring_range then
-				self.device:ring_range(enc, from, to, val)
-			end
-		end
-	end
-	return vport
+	return oscgard.arc.vports[n]
 end
 
 ------------------------------------------

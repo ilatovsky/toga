@@ -156,53 +156,89 @@ oscgard.arc = { vports = init_vports("arc"), add = nil, remove = nil }
 
 ---
 
-### 2. Grid Class (`lib/oscgard_grid.lua`)
+### 2. Shared Buffer Module (`lib/buffer.lua`)
+
+A reusable packed bitwise storage module used by both grid and arc devices.
+
+#### Features
+
+- **Packed storage**: 4 bits per LED (16 brightness levels), 8 LEDs per 32-bit word
+- **Dirty bit tracking**: 1 bit per LED for efficient update detection
+- **Memory efficient**: 94% reduction vs 2D arrays
+- **Hex serialization**: Direct conversion to OSC message format
+
+#### API
+
+```lua
+local Buffer = include 'oscgard/lib/buffer'
+
+-- Create buffer for N LEDs
+local buffer = Buffer.new(total_leds)
+
+-- LED operations
+buffer:set(index, brightness)  -- Set LED at index (1-based)
+brightness = buffer:get(index) -- Get LED brightness
+buffer:set_all(brightness)     -- Set all LEDs to same value
+buffer:clear()                 -- Reset all to 0
+
+-- Dirty tracking
+buffer:set_dirty(index)        -- Mark LED as changed
+has_changes = buffer:has_dirty() -- Check if any changes
+buffer:clear_dirty()           -- Clear all dirty flags
+buffer:mark_all_dirty()        -- Mark all as dirty
+
+-- State management
+buffer:commit()                -- Copy new state to old state
+
+-- Serialization
+hex_string = buffer:to_hex_string()    -- Convert to "F00A..." format
+buffer:from_hex_string(hex_string)     -- Load from hex string
+
+-- Statistics
+stats = buffer:stats()  -- Get memory usage info
+```
+
+#### Memory Layout
+
+```
+Configuration:
+- BITS_PER_LED = 4 (16 brightness levels: 0-15)
+- LEDS_PER_WORD = 8 (8 LEDs per 32-bit word)
+
+For 128 LEDs (16×8 grid):
+- Buffer words: 16 (64 bytes)
+- Dirty words: 4 (16 bytes)
+- Total: 160 bytes (old + new + dirty)
+
+Each 32-bit word packs 8 LEDs:
+┌────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+│ LED7   │ LED6   │ LED5   │ LED4   │ LED3   │ LED2   │ LED1   │ LED0   │
+│ 4 bits │ 4 bits │ 4 bits │ 4 bits │ 4 bits │ 4 bits │ 4 bits │ 4 bits │
+└────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+```
+
+### 3. Grid Class (`lib/oscgard_grid.lua`)
 
 Each connected TouchOSC client gets its own OscgardGrid instance.
 
-#### Packed Bitwise Storage
+#### Buffer Usage
 
 ```lua
--- Configuration
-local LEDS_PER_WORD = 8  -- 8 LEDs per 32-bit word
-local BITS_PER_LED = 4   -- 4 bits = 16 brightness levels
+-- Grid creates a buffer for its LEDs
+self.buffer = Buffer.new(cols * rows)
 
--- Create packed buffer (16 words for 128 LEDs)
-local function create_packed_buffer(width, height)
-    local total_leds = width * height  -- 128
-    local num_words = math.ceil(total_leds / LEDS_PER_WORD)  -- 16
-    local buffer = {}
-    for i = 1, num_words do
-        buffer[i] = 0  -- Each word starts as 0x00000000
+-- LED operations delegate to buffer
+function OscgardGrid:led(x, y, z)
+    local index = grid_to_index(x, y, self.cols)
+    self.buffer:set(index, z)
+end
+
+function OscgardGrid:refresh()
+    if self.buffer:has_dirty() then
+        self:send_level_full()
+        self.buffer:commit()
+        self.buffer:clear_dirty()
     end
-    return buffer
-end
-```
-
-#### LED Operations
-
-```lua
--- Get LED brightness from packed buffer
-local function get_led_from_packed(buffer, index)
-    local word_index = math.floor((index - 1) / LEDS_PER_WORD) + 1
-    local led_offset = (index - 1) % LEDS_PER_WORD
-    local bit_shift = led_offset * BITS_PER_LED
-    local mask = (1 << BITS_PER_LED) - 1  -- 0x0F
-    
-    return (buffer[word_index] >> bit_shift) & mask
-end
-
--- Set LED brightness in packed buffer
-local function set_led_in_packed(buffer, index, brightness)
-    local word_index = math.floor((index - 1) / LEDS_PER_WORD) + 1
-    local led_offset = (index - 1) % LEDS_PER_WORD
-    local bit_shift = led_offset * BITS_PER_LED
-    local mask = (1 << BITS_PER_LED) - 1
-    
-    -- Clear old value and set new
-    local clear_mask = ~(mask << bit_shift)
-    buffer[word_index] = (buffer[word_index] & clear_mask) | 
-                         ((brightness & mask) << bit_shift)
 end
 ```
 
@@ -234,37 +270,50 @@ function OscgardGrid:refresh()
         return
     end
     self.last_refresh_time = now
-    
+
     -- Only send if something changed
-    if has_dirty_bits(self.dirty) then
-        self:send_bulk_grid_state()
-        -- Copy new state to old
-        for i = 1, #self.new_buffer do
-            self.old_buffer[i] = self.new_buffer[i]
-        end
-        clear_all_dirty_bits(self.dirty)
+    if self.buffer:has_dirty() then
+        self:send_level_full()
+        self.buffer:commit()
+        self.buffer:clear_dirty()
     end
 end
 
-function OscgardGrid:send_bulk_grid_state()
-    local total_leds = self.cols * self.rows
-    local hex_chars = {}
-    
-    -- Extract each LED and convert to hex
-    for i = 1, total_leds do
-        local brightness = get_led_from_packed(self.new_buffer, i)
-        hex_chars[i] = string.format("%X", brightness)
-    end
-    
-    -- Send as single message
-    local hex_string = table.concat(hex_chars)
-    osc.send(self.client, "/oscgard_bulk", {hex_string})
+function OscgardGrid:send_level_full()
+    local prefix = self.prefix or "/monome"
+    local hex_string = self.buffer:to_hex_string()
+    osc.send(self.client, prefix .. "/grid/led/level/full", { hex_string })
+end
+```
+
+### 4. Arc Class (`lib/oscgard_arc.lua`)
+
+Each connected Arc client gets its own OscgardArc instance.
+
+#### Buffer Usage
+
+```lua
+-- Arc creates a buffer for all encoder rings
+local total_leds = num_encoders * LEDS_PER_RING  -- e.g., 4 * 64 = 256 LEDs
+self.buffer = Buffer.new(total_leds)
+
+-- Convert encoder + LED position to buffer index
+local function ring_to_index(encoder, led)
+    return (encoder - 1) * LEDS_PER_RING + led
+end
+
+-- Ring operations delegate to buffer
+function OscgardArc:ring_set(encoder, led, value)
+    local index = ring_to_index(encoder, led)
+    self.buffer:set(index, value)
+    -- Arc sends immediately (no refresh pattern)
+    osc.send(self.client, prefix .. "/ring/set", { encoder - 1, led - 1, value })
 end
 ```
 
 ---
 
-### 3. TouchOSC Client (`touch_osc_client_script.lua`)
+### 5. TouchOSC Client (`touch_osc_client_script.lua`)
 
 The TouchOSC Lua script receives bulk updates and efficiently updates the UI.
 
@@ -380,14 +429,15 @@ sequenceDiagram
     Script->>OscgardGrid: g:led(5, 3, 15)
     OscgardGrid->>OscgardGrid: transform_coordinates(5, 3, rotation)
     Note over OscgardGrid: storage_x, storage_y<br/>index = (y-1)*16 + x = 37
-    OscgardGrid->>Buffer: set_led_in_packed(37, 15)
-    OscgardGrid->>Buffer: set_dirty_bit(37)
-    
+    OscgardGrid->>Buffer: buffer:set(37, 15)
+    Note over Buffer: Sets brightness + dirty bit
+
     Script->>OscgardGrid: g:refresh()
     OscgardGrid->>OscgardGrid: Check throttle (30Hz)
-    OscgardGrid->>Buffer: Check dirty flags
-    OscgardGrid->>OscgardGrid: Build hex string (128 chars)
-    OscgardGrid->>OSC: osc.send("/oscgard_bulk", hex_string)
+    OscgardGrid->>Buffer: buffer:has_dirty()
+    OscgardGrid->>Buffer: buffer:to_hex_string()
+    Note over Buffer: Builds hex string (128 chars)
+    OscgardGrid->>OSC: osc.send(prefix.."/grid/led/level/full", hex_string)
     OSC->>TouchOSC: UDP packet
     TouchOSC->>TouchOSC: XOR detect changes
     TouchOSC->>TouchOSC: Update button 37 LED

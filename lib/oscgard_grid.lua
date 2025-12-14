@@ -2,36 +2,14 @@
 -- Virtual grid class for creating multiple independent grid instances
 -- Used by mod.lua to create per-client grids
 
+local Buffer = include 'oscgard/lib/buffer'
+
 local OscgardGrid = {}
 OscgardGrid.__index = OscgardGrid
 
--- Packed state configuration (shared)
-local LEDS_PER_WORD = 8 -- 8 LEDs per 32-bit number (4 bits each)
-local BITS_PER_LED = 4  -- 4 bits = 16 brightness levels (0-15)
-
 ------------------------------------------
--- packed buffer operations (local functions)
+-- coordinate operations
 ------------------------------------------
-
-local function create_packed_buffer(width, height)
-	local total_leds = width * height
-	local num_words = math.ceil(total_leds / LEDS_PER_WORD)
-	local buffer = {}
-	for i = 1, num_words do
-		buffer[i] = 0
-	end
-	return buffer
-end
-
-local function create_dirty_flags(width, height)
-	local total_leds = width * height
-	local num_words = math.ceil(total_leds / 32)
-	local dirty = {}
-	for i = 1, num_words do
-		dirty[i] = 0
-	end
-	return dirty
-end
 
 local function grid_to_index(x, y, cols)
 	return (y - 1) * cols + (x - 1) + 1
@@ -68,47 +46,6 @@ local function transform_coordinates(x, y, rotation, cols, rows)
 	return x, y
 end
 
-local function get_led_from_packed(buffer, index)
-	local word_index = math.floor((index - 1) / LEDS_PER_WORD) + 1
-	local led_offset = (index - 1) % LEDS_PER_WORD
-	local bit_shift = led_offset * BITS_PER_LED
-	local mask = (1 << BITS_PER_LED) - 1
-	if not buffer[word_index] then
-		return 0
-	end
-	return (buffer[word_index] >> bit_shift) & mask
-end
-
-local function set_led_in_packed(buffer, index, brightness)
-	local word_index = math.floor((index - 1) / LEDS_PER_WORD) + 1
-	local led_offset = (index - 1) % LEDS_PER_WORD
-	local bit_shift = led_offset * BITS_PER_LED
-	local mask = (1 << BITS_PER_LED) - 1
-	local clear_mask = ~(mask << bit_shift)
-	buffer[word_index] = (buffer[word_index] & clear_mask) | ((brightness & mask) << bit_shift)
-end
-
-local function set_dirty_bit(dirty_array, index)
-	local word_index = math.floor((index - 1) / 32) + 1
-	local bit_index = (index - 1) % 32
-	dirty_array[word_index] = dirty_array[word_index]| (1 << bit_index)
-end
-
-local function clear_all_dirty_bits(dirty_array)
-	for i = 1, #dirty_array do
-		dirty_array[i] = 0
-	end
-end
-
-local function has_dirty_bits(dirty_array)
-	for i = 1, #dirty_array do
-		if dirty_array[i] ~= 0 then
-			return true
-		end
-	end
-	return false
-end
-
 ------------------------------------------
 -- OscgardGrid class
 ------------------------------------------
@@ -130,7 +67,10 @@ function OscgardGrid.new(id, client, cols, rows, serial)
 	self.name = client[1]:gsub("%D", "") .. "|" .. client[2]:gsub("%D", "")
 	self.serial = serial or ("oscgard-" .. client[1] .. ":" .. client[2])
 
-	-- Derive type from dimensions
+	-- Device type for serialosc protocol
+	self.device_type = "grid"
+
+	-- Derive type name from dimensions
 	local total_leds = self.cols * self.rows
 	if total_leds == 64 then
 		self.type = "monome 64"
@@ -148,10 +88,9 @@ function OscgardGrid.new(id, client, cols, rows, serial)
 	-- Client connection
 	self.client = client
 
-	-- State buffers
-	self.old_buffer = create_packed_buffer(self.cols, self.rows)
-	self.new_buffer = create_packed_buffer(self.cols, self.rows)
-	self.dirty = create_dirty_flags(self.cols, self.rows)
+	-- LED state buffer (packed bitwise storage with dirty flags)
+	local total_leds = self.cols * self.rows
+	self.buffer = Buffer.new(total_leds)
 
 	-- Rotation
 	self.rotation_state = 0
@@ -190,22 +129,11 @@ function OscgardGrid:led(x, y, z)
 	end
 
 	local index = grid_to_index(storage_x, storage_y, self.cols)
-	local brightness = math.max(0, math.min(15, z))
-	local current = get_led_from_packed(self.new_buffer, index)
-
-	if current ~= brightness then
-		set_led_in_packed(self.new_buffer, index, brightness)
-		set_dirty_bit(self.dirty, index)
-	end
+	self.buffer:set(index, z)
 end
 
 function OscgardGrid:all(z)
-	local total_leds = self.cols * self.rows
-	local brightness = math.max(0, math.min(15, z))
-	for i = 1, total_leds do
-		set_led_in_packed(self.new_buffer, i, brightness)
-		set_dirty_bit(self.dirty, i)
-	end
+	self.buffer:set_all(z)
 end
 
 function OscgardGrid:refresh()
@@ -215,24 +143,18 @@ function OscgardGrid:refresh()
 	end
 	self.last_refresh_time = now
 
-	if has_dirty_bits(self.dirty) then
-		self:send_bulk_grid_state()
-		for i = 1, #self.new_buffer do
-			self.old_buffer[i] = self.new_buffer[i]
-		end
-		clear_all_dirty_bits(self.dirty)
+	if self.buffer:has_dirty() then
+		self:send_level_full()
+		self.buffer:commit()
+		self.buffer:clear_dirty()
 	end
 end
 
 function OscgardGrid:force_refresh()
-	for i = 1, #self.dirty do
-		self.dirty[i] = 0xFFFFFFFF
-	end
-	self:send_bulk_grid_state()
-	for i = 1, #self.new_buffer do
-		self.old_buffer[i] = self.new_buffer[i]
-	end
-	clear_all_dirty_bits(self.dirty)
+	self.buffer:mark_all_dirty()
+	self:send_level_full()
+	self.buffer:commit()
+	self.buffer:clear_dirty()
 end
 
 function OscgardGrid:intensity(i)
@@ -269,17 +191,9 @@ function OscgardGrid:transform_key(px, py)
 	return px, py
 end
 
-function OscgardGrid:send_bulk_grid_state()
+function OscgardGrid:send_level_full()
 	local prefix = self.prefix or "/monome"
-	local grid_data = {}
-	local total_leds = self.cols * self.rows
-
-	for i = 1, total_leds do
-		local brightness = get_led_from_packed(self.new_buffer, i)
-		grid_data[i] = string.format("%X", brightness)
-	end
-
-	local hex_string = table.concat(grid_data)
+	local hex_string = self.buffer:to_hex_string()
 	osc.send(self.client, prefix .. "/grid/led/level/full", { hex_string })
 end
 
@@ -295,7 +209,7 @@ function OscgardGrid:send_level_map(x_off, y_off)
 			local y = y_off + row + 1
 			if x <= self.cols and y <= self.rows then
 				local index = grid_to_index(x, y, self.cols)
-				levels[#levels + 1] = get_led_from_packed(self.new_buffer, index)
+				levels[#levels + 1] = self.buffer:get(index)
 			else
 				levels[#levels + 1] = 0
 			end
@@ -366,7 +280,7 @@ function OscgardGrid:send_disconnected()
 end
 
 function OscgardGrid:cleanup()
-	self:all(0)
+	self.buffer:clear()
 	self:force_refresh()
 	self:send_disconnected()
 end

@@ -27,12 +27,12 @@ local range_end = 16
 
 function a.delta(n, d)
 	encoder_vals[n] = encoder_vals[n] + d
-	-- simple ring: light up a single LED at position
-	local pos = (encoder_vals[n] % 64) + 1
-	for j = 1, 64 do
-		ring_state[n][j] = (j == pos) and 15 or 0
-	end
-	a:map(n, ring_state[n])
+
+	-- Use segment() for smooth arc visualization
+	local angle = (encoder_vals[n] / 64) * (2 * math.pi)
+	local segment_width = math.pi / 8  -- 1/16th of circle
+	a:segment(n, angle - segment_width, angle + segment_width, 15)
+
 	redraw()
 end
 
@@ -99,17 +99,19 @@ function key(n, z)
 		redraw()
 	elseif n == 3 and z == 1 then
 		if modes[mode] == "set" then
-			a:led(sel_enc, sel_led, sel_val)
+			a:led(sel_enc + 1, sel_led, sel_val)
 		elseif modes[mode] == "all" then
-			a:all(sel_enc, sel_val)
+			a:all(sel_val)
 		elseif modes[mode] == "map" then
-			local vals = {}
-			for i = 1, 64 do
-				vals[i] = (i % 2 == 0) and sel_val or 0
-			end
-			a:map(sel_enc, vals)
+			-- Map is not standard norns arc API - use segment instead
+			local from_angle = 0
+			local to_angle = 2 * math.pi
+			a:segment(sel_enc + 1, from_angle, to_angle, sel_val)
 		elseif modes[mode] == "range" then
-			a:segment(sel_enc, range_start, range_end, sel_val)
+			-- Convert LED positions to radians for segment()
+			local from_angle = ((range_start - 1) / 64) * 2 * math.pi
+			local to_angle = ((range_end - 1) / 64) * 2 * math.pi
+			a:segment(sel_enc + 1, from_angle, to_angle, sel_val)
 		end
 		redraw()
 	end

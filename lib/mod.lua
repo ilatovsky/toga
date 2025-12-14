@@ -83,28 +83,39 @@ local function create_grid_vport()
 	}
 end
 
--- Helper to create vport with arc-like interface
+-- Helper to create vport with arc-like interface (matches norns arc API)
 local function create_arc_vport()
 	return {
 		name = "none",
 		device = nil,
-		delta = nil, -- arc encoder callback
+		delta = nil, -- arc encoder callback function(n, delta)
+		key = nil,   -- arc key callback function(n, z)
 
-		led = function(self, n, x, val)
-			if self.device and self.device.ring_set then self.device:ring_set(n, x, val) end
+		-- Norns arc API methods
+		led = function(self, ring, x, val)
+			if self.device then self.device:led(ring, x, val) end
 		end,
-		all = function(self, n, val)
-			if self.device and self.device.ring_all then self.device:ring_all(n, val) end
+		all = function(self, val)
+			if self.device then self.device:all(val) end
 		end,
-		map = function(self, n, values)
-			if self.device and self.device.ring_map then self.device:ring_map(n, values) end
-		end,
-		range = function(self, n, x1, x2, val)
-			if self.device and self.device.ring_range then self.device:ring_range(n, x1, x2, val) end
+		segment = function(self, ring, from_angle, to_angle, level)
+			if self.device then self.device:segment(ring, from_angle, to_angle, level) end
 		end,
 		refresh = function(self)
-			-- Optionally implement refresh logic
+			if self.device then self.device:refresh() end
 		end,
+		intensity = function(self, i)
+			if self.device then self.device:intensity(i) end
+		end,
+
+		-- Serialosc arc protocol methods (for compatibility)
+		ring_map = function(self, ring, levels)
+			if self.device then self.device:ring_map(ring, levels) end
+		end,
+		ring_range = function(self, ring, x1, x2, val)
+			if self.device then self.device:ring_range(ring, x1, x2, val) end
+		end,
+
 		encoders = 4
 	}
 end
@@ -213,13 +224,8 @@ local function create_device(slot, client, device_type, cols, rows, serial)
 
 	local device
 	if device_type == "arc" then
-		device = OscgardArc.new(id, cols)
+		device = OscgardArc.new(id, client, cols, serial)
 		device.port = slot
-		device.device_type = device_type
-		device.client = client
-		device.serial = serial or ("arc-" .. id)
-		device.name = device.serial
-		-- Optionally add more arc-specific fields
 		-- Set up delta callback
 		device.delta = function(n, d)
 			if vports[slot].delta then
@@ -229,7 +235,6 @@ local function create_device(slot, client, device_type, cols, rows, serial)
 	else
 		device = OscgardGrid.new(id, client, cols, rows, serial)
 		device.port = slot
-		device.device_type = device_type
 	end
 
 	-- store in vport
@@ -474,6 +479,30 @@ local function oscgard_osc_handler(path, args, from)
 			-- Transform physical coords to logical coords based on rotation
 			local lx, ly = device:transform_key(x, y)
 			device.key(lx, ly, z)
+		end
+		return
+	end
+
+	-- ========================================
+	-- SERIALOSC STANDARD: Arc encoder input
+	-- ========================================
+
+	-- <prefix>/enc/delta ii n d (0-indexed encoder, signed delta)
+	if path == prefix .. "/enc/delta" then
+		if device and device.delta and args[1] and args[2] then
+			local n = math.floor(args[1]) + 1  -- Convert 0-indexed to 1-indexed
+			local d = math.floor(args[2])      -- Signed delta value
+			device.delta(n, d)
+		end
+		return
+	end
+
+	-- <prefix>/enc/key ii n s (0-indexed encoder, state 0/1)
+	if path == prefix .. "/enc/key" then
+		if device and device.key and args[1] and args[2] then
+			local n = math.floor(args[1]) + 1  -- Convert 0-indexed to 1-indexed
+			local z = math.floor(args[2])      -- Key state (0=up, 1=down)
+			device.key(n, z)
 		end
 		return
 	end
