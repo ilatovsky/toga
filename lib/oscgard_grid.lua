@@ -1,8 +1,12 @@
 -- oscgard_grid.lua
--- Virtual grid class for creating multiple independent grid instances
--- Used by mod.lua to create per-client grids
+-- Virtual grid module for oscgard
+-- Manages grid devices, vports, and grid-specific OSC protocol
 
 local Buffer = include 'oscgard/lib/buffer'
+
+------------------------------------------
+-- OscgardGrid device class (internal)
+------------------------------------------
 
 local OscgardGrid = {}
 OscgardGrid.__index = OscgardGrid
@@ -290,4 +294,158 @@ function OscgardGrid:cleanup()
 	self:send_disconnected()
 end
 
-return OscgardGrid
+------------------------------------------
+-- Module state and exports
+------------------------------------------
+
+local MAX_SLOTS = 4
+
+-- Helper to create vport with grid-like interface
+local function create_grid_vport()
+	return {
+		name = "none",
+		device = nil,
+		key = nil,
+
+		led = function(self, x, y, val)
+			if self.device then self.device:led(x, y, val) end
+		end,
+		all = function(self, val)
+			if self.device then self.device:all(val) end
+		end,
+		refresh = function(self)
+			if self.device then self.device:refresh() end
+		end,
+		rotation = function(self, r)
+			if self.device then self.device:rotation(r) end
+		end,
+		intensity = function(self, i)
+			if self.device then self.device:intensity(i) end
+		end,
+		cols = 16,
+		rows = 8
+	}
+end
+
+-- Initialize vports
+local vports = {}
+for i = 1, MAX_SLOTS do
+	vports[i] = create_grid_vport()
+end
+
+-- Module exports
+local module = {
+	vports = vports,
+	add = nil,    -- callback function(vport) called when grid connects
+	remove = nil  -- callback function(vport) called when grid disconnects
+}
+
+-- Create a new grid device and attach to vport
+-- Called by mod.lua when a client connects
+function module.create_vport(slot, client, cols, rows, serial)
+	-- generate unique id
+	local id = 100 + slot
+
+	-- default dimensions
+	cols = cols or 16
+	rows = rows or 8
+
+	-- create device
+	local device = OscgardGrid.new(id, client, cols, rows, serial)
+	device.port = slot
+
+	-- store in vport
+	local vport = vports[slot]
+	vport.device = device
+	vport.name = device.name
+
+	-- set up key callback
+	device.key = function(x, y, z)
+		if vport.key then
+			vport.key(x, y, z)
+		end
+	end
+
+	print("oscgard: grid registered on slot " .. slot .. " (id=" .. id .. ", client=" .. client[1] .. ":" .. client[2] .. ")")
+
+	-- send connection confirmation
+	device:send_connected(true)
+
+	-- call add callback if set
+	if module.add then
+		module.add(vport)
+	end
+
+	return device
+end
+
+-- Remove grid device from vport
+-- Called by mod.lua when a client disconnects
+function module.destroy_vport(slot)
+	local vport = vports[slot]
+	local device = vport.device
+	if not device then return end
+
+	-- call remove callback if set (before cleanup)
+	if module.remove then
+		module.remove(vport)
+	end
+
+	-- cleanup (clear LEDs, send disconnect)
+	device:cleanup()
+
+	print("oscgard: grid removed from slot " .. slot)
+
+	-- clear vport
+	vport.device = nil
+	vport.name = "none"
+end
+
+-- Handle grid-specific OSC messages
+-- Called by mod.lua for messages that match grid patterns
+-- Returns true if message was handled
+function module.handle_osc(path, args, device, prefix)
+	-- <prefix>/grid/key x y s (0-indexed coordinates, standard monome format)
+	if path == prefix .. "/grid/key" then
+		if device and device.key and args[1] and args[2] and args[3] then
+			local x = math.floor(args[1] + 1) -- Convert 0-indexed to 1-indexed
+			local y = math.floor(args[2] + 1)
+			local z = math.floor(args[3])
+			-- Transform physical coords to logical coords based on rotation
+			local lx, ly = device:transform_key(x, y)
+			device.key(lx, ly, z)
+		end
+		return true
+	end
+
+	return false
+end
+
+-- Public API (matches norns grid.connect style)
+function module.connect(port)
+	port = port or 1
+	return vports[port]
+end
+
+function module.connect_any()
+	for i = 1, MAX_SLOTS do
+		if vports[i].device then
+			return vports[i]
+		end
+	end
+	return nil
+end
+
+function module.disconnect(slot)
+	module.destroy_vport(slot)
+end
+
+function module.get_slots()
+	return vports
+end
+
+function module.get_device(slot)
+	return vports[slot] and vports[slot].device
+end
+
+return module

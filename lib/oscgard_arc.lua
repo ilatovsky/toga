@@ -1,8 +1,13 @@
 -- oscgard_arc.lua
--- Virtual Arc class for emulating Monome Arc devices via OSC
+-- Virtual arc module for oscgard
+-- Manages arc devices, vports, and arc-specific OSC protocol
 -- Follows norns arc API: https://monome.org/docs/norns/api/modules/arc.html
 
 local Buffer = include 'oscgard/lib/buffer'
+
+------------------------------------------
+-- OscgardArc device class (internal)
+------------------------------------------
 
 local OscgardArc = {}
 OscgardArc.__index = OscgardArc
@@ -269,11 +274,6 @@ end
 
 -- Cleanup method for arc device (called on device removal)
 function OscgardArc:cleanup()
-	-- Call remove callback if set
-	if self.remove then
-		self.remove()
-	end
-
 	-- Clear LED state
 	self.buffer:clear()
 	self:send_disconnected()
@@ -304,4 +304,182 @@ function OscgardArc:send_connected()
 	end
 end
 
-return OscgardArc
+------------------------------------------
+-- Module state and exports
+------------------------------------------
+
+local MAX_SLOTS = 4
+
+-- Helper to create vport with arc-like interface (matches norns arc API)
+local function create_arc_vport()
+	return {
+		name = "none",
+		device = nil,
+		delta = nil, -- arc encoder callback function(n, delta)
+		key = nil,   -- arc key callback function(n, z)
+
+		-- Norns arc API methods
+		led = function(self, ring, x, val)
+			if self.device then self.device:led(ring, x, val) end
+		end,
+		all = function(self, val)
+			if self.device then self.device:all(val) end
+		end,
+		segment = function(self, ring, from_angle, to_angle, level)
+			if self.device then self.device:segment(ring, from_angle, to_angle, level) end
+		end,
+		refresh = function(self)
+			if self.device then self.device:refresh() end
+		end,
+		intensity = function(self, i)
+			if self.device then self.device:intensity(i) end
+		end,
+
+		-- Serialosc arc protocol methods (for compatibility)
+		ring_map = function(self, ring, levels)
+			if self.device then self.device:ring_map(ring, levels) end
+		end,
+		ring_range = function(self, ring, x1, x2, val)
+			if self.device then self.device:ring_range(ring, x1, x2, val) end
+		end,
+
+		encoders = 4
+	}
+end
+
+-- Initialize vports
+local vports = {}
+for i = 1, MAX_SLOTS do
+	vports[i] = create_arc_vport()
+end
+
+-- Module exports
+local module = {
+	vports = vports,
+	add = nil,    -- callback function(vport) called when arc connects
+	remove = nil  -- callback function(vport) called when arc disconnects
+}
+
+-- Create a new arc device and attach to vport
+-- Called by mod.lua when a client connects
+function module.create_vport(slot, client, cols, rows, serial)
+	-- generate unique id
+	local id = 200 + slot
+
+	-- default dimensions for arc (cols = encoders, rows = leds per ring)
+	cols = cols or 4
+	rows = rows or 64
+
+	-- create device
+	local device = OscgardArc.new(id, client, cols, serial)
+	device.port = slot
+
+	-- store in vport
+	local vport = vports[slot]
+	vport.device = device
+	vport.name = device.name
+
+	-- Set up delta callback
+	device.delta = function(n, d)
+		if vport.delta then
+			vport.delta(n, d)
+		end
+	end
+
+	-- Set up key callback
+	device.key = function(n, z)
+		if vport.key then
+			vport.key(n, z)
+		end
+	end
+
+	print("oscgard: arc registered on slot " .. slot .. " (id=" .. id .. ", client=" .. client[1] .. ":" .. client[2] .. ")")
+
+	-- send connection confirmation
+	device:send_connected()
+
+	-- call add callback if set
+	if module.add then
+		module.add(vport)
+	end
+
+	return device
+end
+
+-- Remove arc device from vport
+-- Called by mod.lua when a client disconnects
+function module.destroy_vport(slot)
+	local vport = vports[slot]
+	local device = vport.device
+	if not device then return end
+
+	-- call remove callback if set (before cleanup)
+	if module.remove then
+		module.remove(vport)
+	end
+
+	-- cleanup (clear LEDs, send disconnect)
+	device:cleanup()
+
+	print("oscgard: arc removed from slot " .. slot)
+
+	-- clear vport
+	vport.device = nil
+	vport.name = "none"
+end
+
+-- Handle arc-specific OSC messages
+-- Called by mod.lua for messages that match arc patterns
+-- Returns true if message was handled
+function module.handle_osc(path, args, device, prefix)
+	-- <prefix>/enc/delta ii n d (0-indexed encoder, signed delta)
+	if path == prefix .. "/enc/delta" then
+		if device and device.delta and args[1] and args[2] then
+			local n = math.floor(args[1]) + 1  -- Convert 0-indexed to 1-indexed
+			local d = math.floor(args[2])      -- Signed delta value
+			device.delta(n, d)
+		end
+		return true
+	end
+
+	-- <prefix>/enc/key ii n s (0-indexed encoder, state 0/1)
+	if path == prefix .. "/enc/key" then
+		if device and device.key and args[1] and args[2] then
+			local n = math.floor(args[1]) + 1  -- Convert 0-indexed to 1-indexed
+			local z = math.floor(args[2])      -- Key state (0=up, 1=down)
+			device.key(n, z)
+		end
+		return true
+	end
+
+	return false
+end
+
+-- Public API (matches norns arc.connect style)
+function module.connect(port)
+	port = port or 1
+	return vports[port]
+end
+
+function module.connect_any()
+	for i = 1, MAX_SLOTS do
+		if vports[i].device then
+			return vports[i]
+		end
+	end
+	return nil
+end
+
+function module.disconnect(slot)
+	module.destroy_vport(slot)
+end
+
+function module.get_slots()
+	return vports
+end
+
+function module.get_device(slot)
+	return vports[slot] and vports[slot].device
+end
+
+return module

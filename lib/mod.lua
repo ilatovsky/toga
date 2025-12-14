@@ -22,8 +22,9 @@ print("oscgard mod: loading...")
 
 local mod = require 'core/mods'
 
-local OscgardGrid = include 'oscgard/lib/oscgard_grid'
-local OscgardArc = include 'oscgard/lib/oscgard_arc'
+-- Virtual device modules
+local grid_module = include 'oscgard/lib/oscgard_grid'
+local arc_module = include 'oscgard/lib/oscgard_arc'
 
 ------------------------------------------
 -- state
@@ -35,7 +36,6 @@ local oscgard = {
 
 	-- menu state
 	menu_selected = 1,
-	menu_device_type = "grid", -- "grid" or "arc"
 	menu_metro = nil, -- metro for real-time menu updates
 
 	-- serialosc-compatible settings
@@ -43,99 +43,24 @@ local oscgard = {
 
 	notify_clients = {}, -- clients subscribed to device notifications
 
-	-- callbacks (set by scripts) - separate for grid and arc
-	grid = {
-		add = nil, -- function(dev) called when grid connects
-		remove = nil -- function(dev) called when grid disconnects
-	},
-	arc = {
-		add = nil, -- function(dev) called when arc connects
-		remove = nil -- function(dev) called when arc disconnects
-	}
+	-- device modules
+	grid = grid_module,
+	arc = arc_module
 }
 
 -- max slots (norns has 4 ports each for grid and arc)
 local MAX_SLOTS = 4
 
--- Helper to create vport with grid-like interface
-local function create_grid_vport()
-	return {
-		name = "none",
-		device = nil,
-		key = nil,
-
-		led = function(self, x, y, val)
-			if self.device then self.device:led(x, y, val) end
-		end,
-		all = function(self, val)
-			if self.device then self.device:all(val) end
-		end,
-		refresh = function(self)
-			if self.device then self.device:refresh() end
-		end,
-		rotation = function(self, r)
-			if self.device then self.device:rotation(r) end
-		end,
-		intensity = function(self, i)
-			if self.device then self.device:intensity(i) end
-		end,
-		cols = 16,
-		rows = 8
-	}
-end
-
--- Helper to create vport with arc-like interface (matches norns arc API)
-local function create_arc_vport()
-	return {
-		name = "none",
-		device = nil,
-		delta = nil, -- arc encoder callback function(n, delta)
-		key = nil,   -- arc key callback function(n, z)
-
-		-- Norns arc API methods
-		led = function(self, ring, x, val)
-			if self.device then self.device:led(ring, x, val) end
-		end,
-		all = function(self, val)
-			if self.device then self.device:all(val) end
-		end,
-		segment = function(self, ring, from_angle, to_angle, level)
-			if self.device then self.device:segment(ring, from_angle, to_angle, level) end
-		end,
-		refresh = function(self)
-			if self.device then self.device:refresh() end
-		end,
-		intensity = function(self, i)
-			if self.device then self.device:intensity(i) end
-		end,
-
-		-- Serialosc arc protocol methods (for compatibility)
-		ring_map = function(self, ring, levels)
-			if self.device then self.device:ring_map(ring, levels) end
-		end,
-		ring_range = function(self, ring, x1, x2, val)
-			if self.device then self.device:ring_range(ring, x1, x2, val) end
-		end,
-
-		encoders = 4
-	}
-end
-
--- Separate vports for grids and arcs (mirrors norns grid.vports / arc.vports)
-oscgard.grid.vports = {}
-oscgard.arc.vports = {}
-
-for i = 1, MAX_SLOTS do
-	oscgard.grid.vports[i] = create_grid_vport()
-	oscgard.arc.vports[i] = create_arc_vport()
-end
-
 ------------------------------------------
 -- slot management
 ------------------------------------------
 
+local function get_module(device_type)
+	return device_type == "arc" and arc_module or grid_module
+end
+
 local function find_free_slot(device_type)
-	local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
+	local vports = get_module(device_type).vports
 	for i = 1, MAX_SLOTS do
 		if not vports[i].device then
 			return i
@@ -146,7 +71,7 @@ end
 
 local function find_client_slot(ip, port, device_type)
 	-- match by both IP and port
-	local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
+	local vports = get_module(device_type).vports
 	for i = 1, MAX_SLOTS do
 		local device = vports[i].device
 		if device and device.client[1] == ip and device.client[2] == port then
@@ -203,100 +128,30 @@ end
 ------------------------------------------
 
 local function create_device(slot, client, device_type, cols, rows, serial)
-	-- generate unique id (offset by device type to avoid conflicts)
-	local id = (device_type == "arc" and 200 or 100) + slot
-
-	-- default dimensions based on device type
 	device_type = device_type or "grid"
-	if device_type == "grid" then
-		cols = cols or 16
-		rows = rows or 8
-	elseif device_type == "arc" then
-		cols = cols or 4 -- number of encoders
-		rows = rows or 64 -- LEDs per encoder
-	else
-		cols = cols or 16
-		rows = rows or 8
-	end
+	local device_module = get_module(device_type)
 
-	-- select appropriate vports array
-	local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
-	local callbacks = device_type == "arc" and oscgard.arc or oscgard.grid
-
-	local device
-	if device_type == "arc" then
-		device = OscgardArc.new(id, client, cols, serial)
-		device.port = slot
-		-- Set up delta callback
-		device.delta = function(n, d)
-			if vports[slot].delta then
-				vports[slot].delta(n, d)
-			end
-		end
-	else
-		device = OscgardGrid.new(id, client, cols, rows, serial)
-		device.port = slot
-	end
-
-	-- store in vport
-	local vport = vports[slot]
-	vport.device = device
-	vport.name = device.name
-
-	-- set up key callback for grid
-	if device_type == "grid" then
-		device.key = function(x, y, z)
-			if vport.key then
-				vport.key(x, y, z)
-			end
-		end
-	end
-
-	print("oscgard: " ..
-		device_type ..
-		" registered on slot " .. slot .. " (id=" .. id .. ", client=" .. client[1] .. ":" .. client[2] .. ")")
-
-	-- send connection confirmation
-	if device.send_connected then
-		device:send_connected(true)
-	end
+	-- delegate to module's create_vport
+	local device = device_module.create_vport(slot, client, cols, rows, serial)
 
 	-- notify serialosc subscribers
 	notify_device_added(device)
-
-	-- call add callback if set
-	if callbacks.add then
-		callbacks.add(vport)
-	end
 
 	return device
 end
 
 local function remove_device(slot, device_type)
 	device_type = device_type or "grid"
-	local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
-	local callbacks = device_type == "arc" and oscgard.arc or oscgard.grid
-
-	local vport = vports[slot]
+	local device_module = get_module(device_type)
+	local vport = device_module.vports[slot]
 	local device = vport.device
 	if not device then return end
 
-	-- call remove callback if set (before cleanup)
-	if callbacks.remove then
-		callbacks.remove(vport)
-	end
-
-	-- cleanup (clear LEDs, send disconnect)
-	device:cleanup()
-
-	print("oscgard: " .. device_type .. " removed from slot " .. slot)
-
-	-- clear vport
-	vport.device = nil
-	vport.name = "none"
-
-	-- notify serialosc subscribers
+	-- notify serialosc subscribers (before removal)
 	notify_device_removed(device)
+
+	-- delegate to module's destroy_vport
+	device_module.destroy_vport(slot)
 end
 
 ------------------------------------------
@@ -314,27 +169,19 @@ local function handle_serialosc_discovery(path, args, from)
 		local port = args[2] or from[2]
 		local target = { host, port }
 
-		-- List all grid devices
-		for i = 1, MAX_SLOTS do
-			local device = oscgard.grid.vports[i].device
-			if device then
-				-- /serialosc/device ssi <id> <type> <port>
-				osc.send(target, "/serialosc/device", {
-					device.serial,
-					device.type,
-					device.port
-				})
-			end
-		end
-		-- List all arc devices
-		for i = 1, MAX_SLOTS do
-			local device = oscgard.arc.vports[i].device
-			if device then
-				osc.send(target, "/serialosc/device", {
-					device.serial,
-					device.type,
-					device.port
-				})
+		-- List all devices (both grid and arc)
+		for _, device_type in ipairs({ "grid", "arc" }) do
+			local device_module = get_module(device_type)
+			for i = 1, MAX_SLOTS do
+				local device = device_module.vports[i].device
+				if device then
+					-- /serialosc/device ssi <id> <type> <port>
+					osc.send(target, "/serialosc/device", {
+						device.serial,
+						device.type,
+						device.port
+					})
+				end
 			end
 		end
 		return true
@@ -381,15 +228,12 @@ local original_norns_osc_event = nil
 
 -- Helper to find client in either grid or arc vports
 local function find_client_any(ip, port)
-	-- Check grids first
-	local slot = find_client_slot(ip, port, "grid")
-	if slot then
-		return slot, "grid", oscgard.grid.vports[slot].device
-	end
-	-- Check arcs
-	slot = find_client_slot(ip, port, "arc")
-	if slot then
-		return slot, "arc", oscgard.arc.vports[slot].device
+	for _, device_type in ipairs({ "grid", "arc" }) do
+		local slot = find_client_slot(ip, port, device_type)
+		if slot then
+			local device_module = get_module(device_type)
+			return slot, device_type, device_module.vports[slot].device
+		end
 	end
 	return nil, nil, nil
 end
@@ -468,43 +312,16 @@ local function oscgard_osc_handler(path, args, from)
 	end
 
 	-- ========================================
-	-- SERIALOSC STANDARD: Grid key input
+	-- DEVICE-SPECIFIC: Grid and Arc input messages
 	-- ========================================
 
-	-- <prefix>/grid/key x y s (0-indexed coordinates, standard monome format)
-	if path == prefix .. "/grid/key" then
-		if device and device.key and args[1] and args[2] and args[3] then
-			local x = math.floor(args[1] + 1) -- Convert 0-indexed to 1-indexed
-			local y = math.floor(args[2] + 1)
-			local z = math.floor(args[3])
-			-- Transform physical coords to logical coords based on rotation
-			local lx, ly = device:transform_key(x, y)
-			device.key(lx, ly, z)
-		end
+	-- Try to handle with grid module
+	if device and grid_module.handle_osc(path, args, device, prefix) then
 		return
 	end
 
-	-- ========================================
-	-- SERIALOSC STANDARD: Arc encoder input
-	-- ========================================
-
-	-- <prefix>/enc/delta ii n d (0-indexed encoder, signed delta)
-	if path == prefix .. "/enc/delta" then
-		if device and device.delta and args[1] and args[2] then
-			local n = math.floor(args[1]) + 1  -- Convert 0-indexed to 1-indexed
-			local d = math.floor(args[2])      -- Signed delta value
-			device.delta(n, d)
-		end
-		return
-	end
-
-	-- <prefix>/enc/key ii n s (0-indexed encoder, state 0/1)
-	if path == prefix .. "/enc/key" then
-		if device and device.key and args[1] and args[2] then
-			local n = math.floor(args[1]) + 1  -- Convert 0-indexed to 1-indexed
-			local z = math.floor(args[2])      -- Key state (0=up, 1=down)
-			device.key(n, z)
-		end
+	-- Try to handle with arc module
+	if device and arc_module.handle_osc(path, args, device, prefix) then
 		return
 	end
 
@@ -532,9 +349,12 @@ local function oscgard_osc_handler(path, args, from)
 		if existing_slot then
 			-- already connected, just refresh
 			print("oscgard: client already on " .. existing_type .. " slot " .. existing_slot .. ", refreshing")
-			local existing_device = oscgard[existing_type].vports[existing_slot].device
+			local existing_module = get_module(existing_type)
+			local existing_device = existing_module.vports[existing_slot].device
 			existing_device:send_connected(true)
-			existing_device:force_refresh()
+			if existing_device.force_refresh then
+				existing_device:force_refresh()
+			end
 			send_sys_info({ ip, port }, existing_device)
 		else
 			-- new client - find free slot for the requested device type
@@ -561,9 +381,9 @@ local function oscgard_osc_handler(path, args, from)
 			-- Disconnect specific device by serial
 			local found = false
 			for _, device_type in ipairs({ "grid", "arc" }) do
-				local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
+				local device_module = get_module(device_type)
 				for slot = 1, MAX_SLOTS do
-					local device = vports[slot].device
+					local device = device_module.vports[slot].device
 					if device and device.serial == serial then
 						print("oscgard: disconnect request for serial " .. serial .. " from " .. ip .. ":" .. port)
 						remove_device(slot, device_type)
@@ -580,9 +400,9 @@ local function oscgard_osc_handler(path, args, from)
 			-- Disconnect all devices from this client (ip:port)
 			local count = 0
 			for _, device_type in ipairs({ "grid", "arc" }) do
-				local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
+				local device_module = get_module(device_type)
 				for slot = 1, MAX_SLOTS do
-					local device = vports[slot].device
+					local device = device_module.vports[slot].device
 					if device and device.client[1] == ip and device.client[2] == port then
 						print("oscgard: disconnect " .. device_type .. " slot " .. slot .. " from " .. ip .. ":" .. port)
 						remove_device(slot, device_type)
@@ -636,8 +456,9 @@ if mod and mod.hook and mod.hook.register then
 			if oscgard.initialized then
 				-- Cleanup both grid and arc devices
 				for _, device_type in ipairs({ "grid", "arc" }) do
+					local device_module = get_module(device_type)
 					for slot = 1, MAX_SLOTS do
-						if oscgard[device_type].vports[slot].device then
+						if device_module.vports[slot].device then
 							remove_device(slot, device_type)
 						end
 					end
@@ -657,11 +478,14 @@ if mod and mod.hook and mod.hook.register then
 			print("calling: oscgard script cleanup")
 			-- Clear both grid and arc devices when script changes
 			for _, device_type in ipairs({ "grid", "arc" }) do
+				local device_module = get_module(device_type)
 				for i = 1, MAX_SLOTS do
-					local device = oscgard[device_type].vports[i].device
+					local device = device_module.vports[i].device
 					if device then
 						device:all(0)
-						device:force_refresh()
+						if device.force_refresh then
+							device:force_refresh()
+						end
 					end
 				end
 			end
@@ -678,8 +502,9 @@ end
 local function get_all_connected_devices()
 	local devices = {}
 	for _, device_type in ipairs({ "grid", "arc" }) do
+		local device_module = get_module(device_type)
 		for slot = 1, MAX_SLOTS do
-			local device = oscgard[device_type].vports[slot].device
+			local device = device_module.vports[slot].device
 			if device then
 				table.insert(devices, { device_type = device_type, slot = slot, device = device })
 			end
@@ -788,63 +613,9 @@ mod.menu.register(mod.this_name, m)
 -- public API
 ------------------------------------------
 
--- Grid API (matches norns grid.connect style)
--- Usage: local g = oscgard.grid.connect(1)
-function oscgard.grid.connect(port)
-	port = port or 1
-	return oscgard.grid.vports[port]
-end
-
--- Connect to first available oscgard grid
-function oscgard.grid.connect_any()
-	for i = 1, MAX_SLOTS do
-		if oscgard.grid.vports[i].device then
-			return oscgard.grid.vports[i]
-		end
-	end
-	return nil
-end
-
-function oscgard.grid.disconnect(slot)
-	remove_device(slot, "grid")
-end
-
-function oscgard.grid.get_slots()
-	return oscgard.grid.vports
-end
-
-function oscgard.grid.get_device(slot)
-	return oscgard.grid.vports[slot] and oscgard.grid.vports[slot].device
-end
-
--- Arc API (matches norns arc.connect style)
--- Usage: local a = oscgard.arc.connect(1)
-function oscgard.arc.connect(port)
-	port = port or 1
-	return oscgard.arc.vports[port]
-end
-
--- Connect to first available oscgard arc
-function oscgard.arc.connect_any()
-	for i = 1, MAX_SLOTS do
-		if oscgard.arc.vports[i].device then
-			return oscgard.arc.vports[i]
-		end
-	end
-	return nil
-end
-
-function oscgard.arc.disconnect(slot)
-	remove_device(slot, "arc")
-end
-
-function oscgard.arc.get_slots()
-	return oscgard.arc.vports
-end
-
-function oscgard.arc.get_device(slot)
-	return oscgard.arc.vports[slot] and oscgard.arc.vports[slot].device
-end
+-- Note: The grid and arc modules already export their public APIs
+-- (connect, connect_any, disconnect, get_slots, get_device)
+-- These are available via oscgard.grid.* and oscgard.arc.*
 
 -- Mark as loaded and store instance for reuse
 _G.oscgard_mod_loaded = true

@@ -2,6 +2,8 @@
 
 This document provides a detailed technical breakdown of how oscgard works, suitable for developers and AI agents working on the codebase.
 
+> **Last Updated**: December 2025 - Refactored to use virtual device module abstraction
+
 ---
 
 ## System Overview
@@ -10,6 +12,14 @@ Oscgard is an mod that intercepts monome grid/arc API calls and routes them to a
 
 > **Note**: Scripts currently need to be patched to use oscgard. This may change in future versions.
 
+### Architecture Principles
+
+**Virtual Device Abstraction**: As of December 2025, oscgard uses a modular architecture where:
+- **mod.lua** acts as a high-level orchestrator working with virtual devices
+- **oscgard_grid.lua** and **oscgard_arc.lua** are self-contained modules managing their own devices
+- Each module handles device-specific OSC protocol and lifecycle
+- mod.lua has no direct knowledge of device implementation details
+
 ```mermaid
 flowchart TB
     subgraph TouchOSC["TouchOSC Device"]
@@ -17,19 +27,33 @@ flowchart TB
         BulkProcessor["touch_osc_client_script.lua<br/>• Receives /oscgard_bulk messages<br/>• XOR-based differential updates<br/>• Updates only changed LEDs"]
         Layout["oscgard.tosc Layout<br/>• 128 buttons /oscgard/1-128<br/>• Connection via /sys/connect"]
     end
-    
+
     subgraph norns["norns"]
         direction TB
-        Mod["lib/mod.lua<br/>• Hooks _norns.osc.event<br/>• Routes /oscgard_* messages<br/>• Manages slots 1-4 per device type<br/>• Creates OscgardGrid instances"]
-        GridClass["lib/oscgard_grid.lua<br/>• Per-client grid instance<br/>• Packed bitwise LED storage<br/>• Coordinate transformation<br/>• Bulk OSC transmission"]
-        VPorts["oscgard.grid.vports[1-4]<br/>oscgard.arc.vports[1-4]<br/>• Virtual port interfaces<br/>• Matches grid.vports/arc.vports API<br/>• Delegates to device instances"]
+        Mod["lib/mod.lua<br/>• High-level orchestrator<br/>• Hooks _norns.osc.event<br/>• Handles /sys/* and /serialosc/*<br/>• Delegates to device modules<br/>• NO device-specific knowledge"]
+
+        subgraph GridModule["Grid Module (oscgard_grid.lua)"]
+            GridVPorts["vports[1-4]<br/>• Virtual port interfaces<br/>• Delegates to devices"]
+            GridDevices["OscgardGrid instances<br/>• Per-client devices<br/>• LED buffer + rotation<br/>• OSC transmission"]
+            GridOSC["handle_osc()<br/>• /grid/key handling"]
+            GridVPorts --> GridDevices
+        end
+
+        subgraph ArcModule["Arc Module (oscgard_arc.lua)"]
+            ArcVPorts["vports[1-4]<br/>• Virtual port interfaces<br/>• Delegates to devices"]
+            ArcDevices["OscgardArc instances<br/>• Per-client devices<br/>• Ring buffer<br/>• OSC transmission"]
+            ArcOSC["handle_osc()<br/>• /enc/delta handling<br/>• /enc/key handling"]
+            ArcVPorts --> ArcDevices
+        end
+
         UserScript["User Script (patched)<br/>local grid = include 'oscgard/lib/grid'<br/>g = grid.connect()<br/>g:led(x, y, brightness)<br/>g:refresh()"]
-        
-        Mod --> GridClass
-        GridClass --> VPorts
-        VPorts --> UserScript
+
+        Mod --> GridModule
+        Mod --> ArcModule
+        GridModule --> UserScript
+        ArcModule --> UserScript
     end
-    
+
     TouchOSC <-->|"UDP/OSC over WiFi<br/>Norns port 10111 (default), Client port passes with connect command"| norns
 ```
 
@@ -39,7 +63,37 @@ flowchart TB
 
 ### 1. Mod Entry Point (`lib/mod.lua`)
 
-The mod is the central coordinator that runs at system level.
+The mod is the high-level orchestrator working with virtual device abstraction. It delegates device-specific operations to modules.
+
+#### Module Architecture (December 2025 Refactoring)
+
+```lua
+-- Virtual device modules
+local grid_module = include 'oscgard/lib/oscgard_grid'
+local arc_module = include 'oscgard/lib/oscgard_arc'
+
+local oscgard = {
+    initialized = false,
+    prefix = "/oscgard",
+    notify_clients = {},
+
+    -- Device modules (self-contained)
+    grid = grid_module,  -- Manages own vports, callbacks, devices
+    arc = arc_module     -- Manages own vports, callbacks, devices
+}
+
+-- Helper to get module by device type
+local function get_module(device_type)
+    return device_type == "arc" and arc_module or grid_module
+end
+```
+
+**Key Changes**:
+- mod.lua no longer creates or manages vports directly
+- No direct references to OscgardGrid/OscgardArc classes
+- Delegates device creation/destruction to modules
+- Delegates device-specific OSC handling to modules
+- Maintains only high-level orchestration
 
 #### Initialization
 
@@ -56,42 +110,61 @@ Key point: We hook `_norns.osc.event` not `osc.event` because:
 - Scripts can overwrite `osc.event` but not `_norns.osc.event`
 - This ensures oscgard always receives messages first
 
-#### OSC Routing
+#### OSC Routing (Refactored)
 
 ```lua
 local function oscgard_osc_handler(path, args, from)
-    if path == "/sys/connect" then
-        -- Handle connection request
-        local serial = args[1]
-        local device_type = args[2] or "grid"
-        local slot = find_free_slot(device_type)
-        create_device(slot, {from[1], from[2]}, device_type, cols, rows, serial)
-    elseif path:sub(1,9) == "/oscgard/" then
-        -- Handle button press
-        local i = tonumber(path:sub(10))
-        local device_type, slot = find_any_client(from[1], from[2])
-        local device = oscgard[device_type].vports[slot].device
-        -- Transform coords and call key handler
-        device.key(x, y, z)
-        return  -- Consumed, don't pass to original
+    -- Handle serialosc discovery (/serialosc/*, /sys/*)
+    if handle_serialosc_discovery(path, args, from) then
+        return
     end
+
+    local slot, device_type, device = find_client_any(from[1], from[2])
+    local prefix = (device and device.prefix) or oscgard.prefix
+
+    -- Handle /sys/connect, /sys/disconnect, etc.
+    if path == "/sys/connect" then
+        local device_module = get_module(device_type or "grid")
+        local device = device_module.create_vport(slot, client, cols, rows, serial)
+        notify_device_added(device)
+        return
+    end
+
+    -- Delegate device-specific messages to modules
+    if device and grid_module.handle_osc(path, args, device, prefix) then
+        return  -- Grid module handled it
+    end
+
+    if device and arc_module.handle_osc(path, args, device, prefix) then
+        return  -- Arc module handled it
+    end
+
     -- Pass unhandled messages to original handler
-    original_norns_osc_event(path, args, from)
+    if original_norns_osc_event then
+        original_norns_osc_event(path, args, from)
+    end
 end
 ```
 
-#### Slot Management
+**Key Benefits**:
+- Clean separation: mod.lua handles system messages, modules handle device messages
+- Extensible: new device types can be added as modules
+- Maintainable: device logic is isolated
+
+#### Slot Management (Refactored)
 
 ```lua
 -- Up to 4 slots per device type (matching norns grid/arc port limits)
 local MAX_SLOTS = 4
 
--- Separate vports for grids and arcs (matches norns architecture)
--- vports[i].device is the single source of truth for connected devices
+-- Get module reference by device type
+local function get_module(device_type)
+    return device_type == "arc" and arc_module or grid_module
+end
 
 -- Find existing client by IP, port, and device type
 local function find_client_slot(ip, port, device_type)
-    local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
+    local vports = get_module(device_type).vports  -- Module owns vports
     for i = 1, MAX_SLOTS do
         local device = vports[i].device
         if device and device.client[1] == ip and device.client[2] == port then
@@ -106,15 +179,16 @@ local function find_any_client(ip, port)
     for _, device_type in ipairs({ "grid", "arc" }) do
         local slot = find_client_slot(ip, port, device_type)
         if slot then
-            return device_type, slot
+            local device_module = get_module(device_type)
+            return slot, device_type, device_module.vports[slot].device
         end
     end
-    return nil, nil
+    return nil, nil, nil
 end
 
 -- Find first available slot for a device type
 local function find_free_slot(device_type)
-    local vports = device_type == "arc" and oscgard.arc.vports or oscgard.grid.vports
+    local vports = get_module(device_type).vports  -- Module owns vports
     for i = 1, MAX_SLOTS do
         if not vports[i].device then return i end
     end
@@ -122,41 +196,153 @@ local function find_free_slot(device_type)
 end
 ```
 
-#### Virtual Ports
+**Key Changes**:
+- Slot management remains in mod.lua (it's generic)
+- But now accesses vports through module references
+- No hardcoded oscgard.grid.vports or oscgard.arc.vports
+
+#### Device Lifecycle (Delegated to Modules)
 
 ```lua
--- Initialize vports for a device type (like norns grid.vports / arc.vports)
--- vports[i].device stores the device instance (single source of truth)
-local function init_vports(device_type)
-    local vports = {}
-    for i = 1, MAX_SLOTS do
-        vports[i] = {
-            name = "none",
-            device = nil,  -- Device instance when connected
-            key = nil,     -- Script sets this (grid button callback)
-            delta = nil,   -- Script sets this (arc encoder callback)
-            
-            -- Delegate methods to actual device
-            led = function(self, x, y, val)
-                if self.device then self.device:led(x, y, val) end
-            end,
-            refresh = function(self)
-                if self.device then self.device:refresh() end
-            end,
-            -- ... etc
-        }
-    end
-    return vports
+-- Device creation - delegated to module
+local function create_device(slot, client, device_type, cols, rows, serial)
+    device_type = device_type or "grid"
+    local device_module = get_module(device_type)
+
+    -- Module creates vport and attaches device
+    local device = device_module.create_vport(slot, client, cols, rows, serial)
+
+    -- mod.lua handles serialosc notifications
+    notify_device_added(device)
+
+    return device
 end
 
--- Create separate vports for grids and arcs
-oscgard.grid = { vports = init_vports("grid"), add = nil, remove = nil }
-oscgard.arc = { vports = init_vports("arc"), add = nil, remove = nil }
+-- Device removal - delegated to module
+local function remove_device(slot, device_type)
+    device_type = device_type or "grid"
+    local device_module = get_module(device_type)
+    local vport = device_module.vports[slot]
+    local device = vport.device
+    if not device then return end
+
+    -- mod.lua handles serialosc notifications
+    notify_device_removed(device)
+
+    -- Module handles cleanup and vport clearing
+    device_module.destroy_vport(slot)
+end
 ```
+
+**Responsibilities**:
+- **mod.lua**: Orchestrates, handles notifications
+- **Modules**: Create/destroy vports, manage devices, call callbacks
 
 ---
 
-### 2. Shared Buffer Module (`lib/buffer.lua`)
+### 2. Device Modules (`lib/oscgard_grid.lua`, `lib/oscgard_arc.lua`)
+
+Both grid and arc are now self-contained modules that export a consistent interface.
+
+#### Module Structure
+
+Each module exports:
+
+```lua
+return {
+    -- State management
+    vports = { ... },    -- Array of vports[1-4]
+    add = nil,           -- Callback when device connects
+    remove = nil,        -- Callback when device disconnects
+
+    -- Lifecycle (called by mod.lua)
+    create_vport = function(slot, client, cols, rows, serial) ... end,
+    destroy_vport = function(slot) ... end,
+
+    -- OSC handling (called by mod.lua)
+    handle_osc = function(path, args, device, prefix) ... end,
+
+    -- Public API (called by scripts)
+    connect = function(port) ... end,
+    connect_any = function() ... end,
+    disconnect = function(slot) ... end,
+    get_slots = function() ... end,
+    get_device = function(slot) ... end
+}
+```
+
+#### Grid Module (`oscgard_grid.lua`)
+
+```lua
+-- Module creates and manages vports
+local vports = {}
+for i = 1, 4 do
+    vports[i] = {
+        name = "none",
+        device = nil,
+        key = nil,  -- Script callback
+
+        -- Delegate to device
+        led = function(self, x, y, val)
+            if self.device then self.device:led(x, y, val) end
+        end,
+        refresh = function(self)
+            if self.device then self.device:refresh() end
+        end,
+        -- ... etc
+    }
+end
+
+-- Module handles grid-specific OSC
+function module.handle_osc(path, args, device, prefix)
+    if path == prefix .. "/grid/key" then
+        local x = math.floor(args[1] + 1)  -- 0-indexed to 1-indexed
+        local y = math.floor(args[2] + 1)
+        local z = math.floor(args[3])
+        local lx, ly = device:transform_key(x, y)
+        device.key(lx, ly, z)
+        return true  -- Handled
+    end
+    return false  -- Not handled
+end
+```
+
+#### Arc Module (`oscgard_arc.lua`)
+
+```lua
+-- Module handles arc-specific OSC
+function module.handle_osc(path, args, device, prefix)
+    -- /enc/delta - encoder rotation
+    if path == prefix .. "/enc/delta" then
+        local n = math.floor(args[1]) + 1  -- 0-indexed to 1-indexed
+        local d = math.floor(args[2])      -- Signed delta
+        device.delta(n, d)
+        return true
+    end
+
+    -- /enc/key - encoder button press
+    if path == prefix .. "/enc/key" then
+        local n = math.floor(args[1]) + 1
+        local z = math.floor(args[2])
+        device.key(n, z)
+        return true
+    end
+
+    return false
+end
+```
+
+#### Benefits of Module Pattern
+
+1. **Encapsulation**: Each module is self-contained with its own state
+2. **Separation of Concerns**: Device-specific logic is isolated from system logic
+3. **Extensibility**: New device types can be added by creating new modules
+4. **Testability**: Modules can be tested independently
+5. **Maintainability**: Changes to one device type don't affect others
+
+---
+
+### 3. Shared Buffer Module (`lib/buffer.lua`)
 
 A reusable packed bitwise storage module used by both grid and arc devices.
 
@@ -217,9 +403,9 @@ Each 32-bit word packs 8 LEDs:
 └────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┘
 ```
 
-### 3. Grid Class (`lib/oscgard_grid.lua`)
+### 4. Grid Device Class (Internal to `oscgard_grid.lua`)
 
-Each connected TouchOSC client gets its own OscgardGrid instance.
+Each connected TouchOSC client gets its own OscgardGrid instance (internal implementation detail).
 
 #### Buffer Usage
 
@@ -286,9 +472,9 @@ function OscgardGrid:send_level_full()
 end
 ```
 
-### 4. Arc Class (`lib/oscgard_arc.lua`)
+### 5. Arc Device Class (Internal to `oscgard_arc.lua`)
 
-Each connected Arc client gets its own OscgardArc instance.
+Each connected Arc client gets its own OscgardArc instance (internal implementation detail).
 
 #### Buffer Usage
 
@@ -313,7 +499,7 @@ end
 
 ---
 
-### 5. TouchOSC Client (`touch_osc_client_script.lua`)
+### 6. TouchOSC Client (`touch_osc_client_script.lua`)
 
 The TouchOSC Lua script receives bulk updates and efficiently updates the UI.
 
@@ -615,3 +801,74 @@ end
 2. **Bulk efficiency**: Message size, frequency
 3. **Memory usage**: No leaks over time
 4. **CPU usage**: Animation scenarios
+
+---
+
+## Refactoring History
+
+### December 2025: Virtual Device Module Abstraction
+
+**Motivation**: Improve separation of concerns and make the codebase more maintainable by isolating device-specific logic.
+
+#### Changes Made
+
+**Before**:
+- mod.lua directly created vports and managed OscgardGrid/OscgardArc instances
+- Device-specific OSC handling was in mod.lua (`/grid/key`, `/enc/delta`, etc.)
+- Callbacks (add/remove) were stored in mod.lua's oscgard table
+- Tight coupling between orchestration and device implementation
+
+**After**:
+- mod.lua works with virtual device abstraction
+- oscgard_grid and oscgard_arc are self-contained modules
+- Each module exports vports, callbacks, lifecycle methods, and OSC handlers
+- mod.lua delegates to modules via consistent interface
+- Clean separation: mod.lua = orchestration, modules = devices
+
+#### File Changes
+
+**lib/mod.lua** (~175 lines removed, ~50 lines added):
+- Removed vport creation functions
+- Removed device-specific OSC handling
+- Removed public API implementations
+- Added module references and `get_module()` helper
+- Simplified to high-level orchestration only
+
+**lib/oscgard_grid.lua** (~155 lines added):
+- Added module state section
+- Added vport creation and management
+- Added `create_vport()` and `destroy_vport()` lifecycle methods
+- Added `handle_osc()` for `/grid/key` messages
+- Added public API (connect, connect_any, etc.)
+- Now exports module table instead of class
+
+**lib/oscgard_arc.lua** (~185 lines added):
+- Similar structure to grid module
+- Added arc-specific OSC handling (`/enc/delta`, `/enc/key`)
+- Added public API matching norns arc API
+- Now exports module table instead of class
+
+#### Benefits
+
+1. **Maintainability**: Device changes are isolated to their modules
+2. **Extensibility**: New device types can be added as modules without touching mod.lua
+3. **Testability**: Modules can be tested independently
+4. **Clarity**: Clear responsibility boundaries
+5. **No Breaking Changes**: Public API remains the same (`oscgard.grid.*`, `oscgard.arc.*`)
+
+#### API Compatibility
+
+The refactoring maintains full backward compatibility:
+
+```lua
+-- Scripts continue to work unchanged
+local g = oscgard.grid.connect(1)
+g:led(1, 1, 15)
+g:refresh()
+
+-- Callbacks still work
+oscgard.grid.add = function(device) ... end
+oscgard.arc.remove = function(device) ... end
+```
+
+The only difference is that `oscgard.grid` and `oscgard.arc` now reference module objects instead of being plain tables, but this is transparent to users.
