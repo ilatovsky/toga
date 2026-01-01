@@ -56,7 +56,7 @@ local MAX_SLOTS = 4
 ------------------------------------------
 
 local function get_module(device_type)
-	return device_type == "arc" and arc_module or grid_module
+	return oscgard[device_type]
 end
 
 local function find_free_slot(device_type)
